@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Vercel
+.vercel
+
+# Environment (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# Logs & debug
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.tsbuildinfo
+
+# Testing & coverage
+coverage/
+.nyc_output/
+*.lcov
+.jest/
+
+# Supabase local (CLI caches / temp)
+supabase/.temp/
+supabase/.branches/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors & IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Misc
+*.pem
+.turbo
+.cache/
