@@ -201,6 +201,21 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       notify("Booking rescheduled.");
       return true;
     },
+    completeLesson: async (id, payload) => {
+      const res = await managerFetch(businessSlug, `/api/manager/bookings/${id}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Could not complete lesson.");
+        return false;
+      }
+      await loadAll();
+      notify("Lesson completed and report saved.");
+      return true;
+    },
     delete: async (id) => {
       const res = await managerFetch(businessSlug, `/api/manager/bookings/${id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -264,7 +279,8 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
           fullName: payload.fullName,
           email: payload.email,
           phone: payload.phone,
-          status: payload.status
+        status: payload.status,
+        internalNote: payload.internalNote
         };
         const np = payload.newPassword != null ? String(payload.newPassword) : "";
         if (np.length >= 8) patch.newPassword = np;
@@ -312,6 +328,30 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       }
       await loadAll();
       notify(`Customer marked ${status}.`);
+    },
+    loadTimeline: async (id) => {
+      const res = await managerFetch(businessSlug, `/api/manager/customers/${id}/timeline`);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Could not load customer profile.");
+        return null;
+      }
+      return res.json();
+    },
+    saveInternalNote: async (id, internalNote) => {
+      const res = await managerFetch(businessSlug, `/api/manager/customers/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ internalNote })
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Could not save customer note.");
+        return false;
+      }
+      await loadAll();
+      notify("Customer note saved.");
+      return true;
     },
     delete: async (id) => {
       const res = await managerFetch(businessSlug, `/api/manager/customers/${id}`, { method: "DELETE" });

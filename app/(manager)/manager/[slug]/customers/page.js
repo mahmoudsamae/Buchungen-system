@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/i18n/language-provider";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,20 +33,25 @@ export default function CustomersPage() {
   const [editNewPw2, setEditNewPw2] = useState("");
   const [deleting, setDeleting] = useState(null);
   const [historyCustomer, setHistoryCustomer] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyData, setHistoryData] = useState(null);
+  const [historyNote, setHistoryNote] = useState("");
+  const [historySavingNote, setHistorySavingNote] = useState(false);
   const [pwCustomer, setPwCustomer] = useState(null);
   const [pwForm, setPwForm] = useState({ pw1: "", pw2: "" });
   const [editPwError, setEditPwError] = useState("");
 
   const bookingRowsForCustomer = useMemo(() => {
     if (!historyCustomer) return [];
-    return bookings
-      .filter((b) => b.customerUserId === historyCustomer.id)
-      .sort((a, b) => {
-        const d = String(b.date || "").localeCompare(String(a.date || ""));
-        if (d !== 0) return d;
-        return String(b.time || "").localeCompare(String(a.time || ""));
-      });
-  }, [bookings, historyCustomer]);
+    const all = historyData?.upcomingBookings?.length || historyData?.pastBookings?.length
+      ? [...(historyData?.upcomingBookings || []), ...(historyData?.pastBookings || [])]
+      : bookings.filter((b) => b.customerUserId === historyCustomer.id);
+    return [...all].sort((a, b) => {
+      const d = String(b.date || "").localeCompare(String(a.date || ""));
+      if (d !== 0) return d;
+      return String(b.time || "").localeCompare(String(a.time || ""));
+    });
+  }, [bookings, historyCustomer, historyData]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -145,11 +151,17 @@ export default function CustomersPage() {
                             <DropdownMenuContent align="end" className="w-56">
                               <DropdownMenuItem onSelect={() => openEdit(c)}>Edit customer</DropdownMenuItem>
                               <DropdownMenuItem
-                                onSelect={() => {
+                                onSelect={async () => {
                                   setHistoryCustomer(c);
+                                  setHistoryLoading(true);
+                                  setHistoryData(null);
+                                  const timeline = await customerActions.loadTimeline(c.id);
+                                  setHistoryData(timeline);
+                                  setHistoryNote(timeline?.internalNote || c.internalNote || "");
+                                  setHistoryLoading(false);
                                 }}
                               >
-                                View booking history
+                                Open student profile
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               {c.status !== "active" ? (
@@ -426,43 +438,122 @@ export default function CustomersPage() {
         ) : null}
       </ManagerDialog>
 
-      <ManagerDialog open={Boolean(historyCustomer)} onClose={() => setHistoryCustomer(null)} title="Booking history" wide>
+      <ManagerDialog open={Boolean(historyCustomer)} onClose={() => setHistoryCustomer(null)} title="Student profile" wide>
         {historyCustomer ? (
           <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Bookings for <strong className="text-foreground">{historyCustomer.fullName}</strong>
-            </p>
-            {bookingRowsForCustomer.length === 0 ? (
+            <div className="rounded-lg border border-border/70 bg-muted/20 p-3 text-sm">
+              <p className="font-semibold text-foreground">{historyData?.customer?.fullName || historyCustomer.fullName}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {historyData?.customer?.email || historyCustomer.email}
+                {historyData?.customer?.phone ? ` · ${historyData.customer.phone}` : ""}
+              </p>
+            </div>
+
+            {historyLoading ? <p className="text-sm text-muted-foreground">Loading student profile…</p> : null}
+
+            {!historyLoading ? (
+              <>
+                <div className="space-y-2 rounded-lg border border-border/60 p-3">
+                  <p className="text-sm font-semibold">General internal notes</p>
+                  <Textarea
+                    value={historyNote}
+                    onChange={(e) => setHistoryNote(e.target.value)}
+                    placeholder="Permanent internal note about this student..."
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={historySavingNote}
+                      className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-60"
+                      onClick={async () => {
+                        if (!historyCustomer) return;
+                        setHistorySavingNote(true);
+                        const ok = await customerActions.saveInternalNote(historyCustomer.id, historyNote);
+                        if (ok) {
+                          setHistoryData((prev) => (prev ? { ...prev, internalNote: historyNote } : prev));
+                        }
+                        setHistorySavingNote(false);
+                      }}
+                    >
+                      {historySavingNote ? "Saving..." : "Save note"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-border/60 p-3">
+                    <p className="text-sm font-semibold">Upcoming bookings</p>
+                    {(historyData?.upcomingBookings || []).length === 0 ? (
+                      <p className="mt-2 text-xs text-muted-foreground">No upcoming bookings.</p>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        {(historyData?.upcomingBookings || []).map((b) => (
+                          <div key={b.id} className="rounded-md border border-border/50 bg-muted/10 px-2 py-2 text-xs">
+                            <p className="font-medium">
+                              {b.date} · {b.time}
+                              {b.endTime ? `–${b.endTime}` : ""}
+                            </p>
+                            <p className="mt-1 text-muted-foreground">{b.service || "—"}</p>
+                            <div className="mt-1">
+                              <StatusBadge value={b.status} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-lg border border-border/60 p-3">
+                    <p className="text-sm font-semibold">Past bookings</p>
+                    {(historyData?.pastBookings || []).length === 0 ? (
+                      <p className="mt-2 text-xs text-muted-foreground">No past bookings.</p>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        {(historyData?.pastBookings || []).slice(0, 12).map((b) => (
+                          <div key={b.id} className="rounded-md border border-border/50 bg-muted/10 px-2 py-2 text-xs">
+                            <p className="font-medium">
+                              {b.date} · {b.time}
+                              {b.endTime ? `–${b.endTime}` : ""}
+                            </p>
+                            <div className="mt-1">
+                              <StatusBadge value={b.status} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/60 p-3">
+                  <p className="text-sm font-semibold">Lesson history / training reports</p>
+                  {(historyData?.lessonHistory || []).length === 0 ? (
+                    <p className="mt-2 text-xs text-muted-foreground">No lesson reports yet.</p>
+                  ) : (
+                    <div className="mt-2 space-y-2">
+                      {(historyData?.lessonHistory || []).map((r) => (
+                        <div key={r.id} className="rounded-md border border-border/50 bg-muted/10 p-3 text-xs">
+                          <p className="font-medium">
+                            {r.booking?.date || "—"} · {r.booking?.time || "—"}
+                            {r.booking?.endTime ? `–${r.booking.endTime}` : ""}
+                          </p>
+                          <p className="mt-1 text-muted-foreground">{r.booking?.service || "—"}</p>
+                          <p className="mt-2 whitespace-pre-wrap">{r.notes || "—"}</p>
+                          {r.topicsCovered?.length ? (
+                            <p className="mt-2 text-muted-foreground">Topics: {r.topicsCovered.join(", ")}</p>
+                          ) : null}
+                          {r.nextFocus ? <p className="mt-1 text-muted-foreground">Next focus: {r.nextFocus}</p> : null}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : null}
+
+            {!historyLoading && !historyData && bookingRowsForCustomer.length === 0 ? (
               <p className="text-sm text-muted-foreground">No bookings yet.</p>
-            ) : (
-              <div className="max-h-[min(24rem,60vh)] overflow-auto rounded-md border border-border/60">
-                <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm">
-                    <tr className="text-xs text-muted-foreground">
-                      <th className="px-3 py-2 font-medium">Date</th>
-                      <th className="px-3 py-2 font-medium">Time</th>
-                      <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bookingRowsForCustomer.map((b) => (
-                      <tr key={b.id} className="border-t border-border/40">
-                        <td className="px-3 py-2 whitespace-nowrap">{b.date}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          {b.time}
-                          {b.endTime ? `–${b.endTime}` : ""}
-                        </td>
-                        <td className="px-3 py-2">
-                          <StatusBadge value={b.status} />
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground">{b.notes?.trim() ? b.notes : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            ) : null}
             <button type="button" className="rounded-md border px-3 py-1.5 text-xs hover:bg-muted" onClick={() => setHistoryCustomer(null)}>
               Close
             </button>

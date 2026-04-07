@@ -20,6 +20,7 @@ import { ChevronDown } from "lucide-react";
 import { ConfirmDialog, ManagerDialog } from "@/components/manager/dialog";
 import { ManualBookingDialog } from "@/components/manager/manual-booking-dialog";
 import { RescheduleBookingDialog } from "@/components/manager/reschedule-booking-dialog";
+import { CompleteLessonDialog } from "@/components/manager/complete-lesson-dialog";
 import { cn } from "@/lib/utils";
 import { BOOKING_TERMINAL_STATUSES } from "@/lib/manager/booking-constants";
 
@@ -50,7 +51,18 @@ function formatTs(iso) {
   }
 }
 
-function BookingActionsMenu({ item, locked, onDetail, onEdit, onReschedule, onCancel, onDelete }) {
+function BookingActionsMenu({
+  item,
+  locked,
+  onDetail,
+  onEdit,
+  onReschedule,
+  onAccept,
+  onCancel,
+  onNoShow,
+  onComplete,
+  onDelete
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-muted/60">
@@ -59,15 +71,32 @@ function BookingActionsMenu({ item, locked, onDetail, onEdit, onReschedule, onCa
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuItem onSelect={() => onDetail(item)}>Details</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onEdit(item)}>Edit</DropdownMenuItem>
-        {!locked ? <DropdownMenuItem onSelect={() => onReschedule(item)}>Reschedule</DropdownMenuItem> : null}
-        {!locked ? (
-          <DropdownMenuItem onSelect={() => onCancel(item)}>Mark cancelled</DropdownMenuItem>
+        {!locked ? <DropdownMenuItem onSelect={() => onEdit(item)}>Edit</DropdownMenuItem> : null}
+        {item.status === "pending" ? (
+          <>
+            <DropdownMenuItem onSelect={() => onAccept(item)}>Accept booking</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onCancel(item)}>Cancel booking</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => onReschedule(item)}>Reschedule</DropdownMenuItem>
+          </>
         ) : null}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem destructive onSelect={() => onDelete(item)}>
-          Delete
-        </DropdownMenuItem>
+        {item.status === "confirmed" ? (
+          <>
+            <DropdownMenuItem onSelect={() => onComplete(item)}>Complete lesson</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onNoShow(item)}>Mark no-show</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onCancel(item)}>Cancel booking</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => onReschedule(item)}>Reschedule</DropdownMenuItem>
+          </>
+        ) : null}
+        {locked ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem destructive onSelect={() => onDelete(item)}>
+              Delete
+            </DropdownMenuItem>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -84,6 +113,7 @@ export default function BookingsPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
   const [rescheduleFor, setRescheduleFor] = useState(null);
+  const [completeFor, setCompleteFor] = useState(null);
 
   const filtered = useMemo(
     () =>
@@ -157,7 +187,10 @@ export default function BookingsPage() {
                           onDetail={setSelected}
                           onEdit={setEditing}
                           onReschedule={setRescheduleFor}
+                          onAccept={(row) => bookingActions.updateStatus(row.id, "confirmed")}
                           onCancel={(row) => bookingActions.updateStatus(row.id, "cancelled")}
+                          onNoShow={(row) => bookingActions.updateStatus(row.id, "no_show")}
+                          onComplete={(row) => setCompleteFor(row)}
                           onDelete={setDeleteTarget}
                         />
                       </div>
@@ -198,7 +231,10 @@ export default function BookingsPage() {
                             onDetail={setSelected}
                             onEdit={setEditing}
                             onReschedule={setRescheduleFor}
+                            onAccept={(row) => bookingActions.updateStatus(row.id, "confirmed")}
                             onCancel={(row) => bookingActions.updateStatus(row.id, "cancelled")}
+                            onNoShow={(row) => bookingActions.updateStatus(row.id, "no_show")}
+                            onComplete={(row) => setCompleteFor(row)}
                             onDelete={setDeleteTarget}
                           />
                         </td>
@@ -353,6 +389,13 @@ export default function BookingsPage() {
         onClose={() => setRescheduleFor(null)}
         booking={rescheduleFor}
         onReschedule={(id, payload) => bookingActions.reschedule(id, payload)}
+      />
+
+      <CompleteLessonDialog
+        open={Boolean(completeFor)}
+        onClose={() => setCompleteFor(null)}
+        booking={completeFor}
+        onSubmit={(id, payload) => bookingActions.completeLesson(id, payload)}
       />
 
       <ConfirmDialog

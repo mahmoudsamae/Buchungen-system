@@ -18,6 +18,7 @@ import { ChevronDown } from "lucide-react";
 import { localDateString, normalizeBookingDate } from "@/lib/manager/booking-date-utils";
 import { ManualBookingDialog } from "@/components/manager/manual-booking-dialog";
 import { RescheduleBookingDialog } from "@/components/manager/reschedule-booking-dialog";
+import { CompleteLessonDialog } from "@/components/manager/complete-lesson-dialog";
 import { BOOKING_TERMINAL_STATUSES } from "@/lib/manager/booking-constants";
 
 export default function TodayPage() {
@@ -25,6 +26,7 @@ export default function TodayPage() {
   const { t, locale } = useLanguage();
   const [newOpen, setNewOpen] = useState(false);
   const [rescheduleFor, setRescheduleFor] = useState(null);
+  const [completeFor, setCompleteFor] = useState(null);
   const today = useMemo(() => localDateString(new Date()), []);
   const todayLabel = useMemo(
     () =>
@@ -85,33 +87,31 @@ export default function TodayPage() {
                               <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-48">
-                              <DropdownMenuItem
-                                onSelect={() => bookingActions.updateStatus(item.id, "pending")}
-                              >
-                                Mark pending
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => bookingActions.updateStatus(item.id, "confirmed")}
-                              >
-                                Confirm
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => bookingActions.updateStatus(item.id, "cancelled")}
-                              >
-                                Cancel
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => bookingActions.updateStatus(item.id, "completed")}
-                              >
-                                Complete
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={() => bookingActions.updateStatus(item.id, "no_show")}
-                              >
-                                No-show
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onSelect={() => setRescheduleFor(item)}>Reschedule…</DropdownMenuItem>
+                              {item.status === "pending" ? (
+                                <>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "confirmed")}>
+                                    Accept booking
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled")}>
+                                    Cancel booking
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onSelect={() => setRescheduleFor(item)}>Reschedule…</DropdownMenuItem>
+                                </>
+                              ) : null}
+                              {item.status === "confirmed" ? (
+                                <>
+                                  <DropdownMenuItem onSelect={() => setCompleteFor(item)}>Complete lesson</DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "no_show")}>
+                                    Mark no-show
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled")}>
+                                    Cancel booking
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onSelect={() => setRescheduleFor(item)}>Reschedule…</DropdownMenuItem>
+                                </>
+                              ) : null}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         ) : null}
@@ -142,6 +142,13 @@ export default function TodayPage() {
         onClose={() => setRescheduleFor(null)}
         booking={rescheduleFor}
         onReschedule={(id, payload) => bookingActions.reschedule(id, payload)}
+      />
+
+      <CompleteLessonDialog
+        open={Boolean(completeFor)}
+        onClose={() => setCompleteFor(null)}
+        booking={completeFor}
+        onSubmit={(id, payload) => bookingActions.completeLesson(id, payload)}
       />
     </>
   );

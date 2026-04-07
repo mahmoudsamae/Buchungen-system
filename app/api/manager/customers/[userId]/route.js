@@ -59,6 +59,16 @@ export async function PATCH(request, { params }) {
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
+  if (body.internalNote !== undefined) {
+    const { error } = await supabase
+      .from("business_users")
+      .update({ internal_note: String(body.internalNote || "") })
+      .eq("business_id", business.id)
+      .eq("user_id", userId)
+      .eq("role", "customer");
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
   const newPw = body.newPassword != null ? String(body.newPassword) : "";
   if (newPw.length > 0) {
     if (newPw.length < 8) {

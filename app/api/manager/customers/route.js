@@ -13,7 +13,8 @@ function mapCustomer(row, profile) {
     email: p != null && typeof p.email === "string" ? p.email : "",
     phone: p != null && typeof p.phone === "string" ? p.phone : "",
     status: row.status,
-    createdAt: row.created_at?.slice(0, 10) ?? ""
+    createdAt: row.created_at?.slice(0, 10) ?? "",
+    internalNote: row.internal_note || ""
   };
 }
 
@@ -32,7 +33,7 @@ export async function GET(request) {
 
   const { data: rows, error } = await admin
     .from("business_users")
-    .select("id, user_id, status, created_at")
+    .select("id, user_id, status, created_at, internal_note")
     .eq("business_id", business.id)
     .eq("role", "customer")
     .order("created_at", { ascending: false });
