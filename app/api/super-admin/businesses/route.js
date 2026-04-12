@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { guardSuperAdminJson } from "@/lib/auth/guards";
+import { guardPlatformOwnerJson, guardSuperAdminJson } from "@/lib/auth/guards";
 import { createBusinessWithManagerAdmin, listAllBusinessesAdmin } from "@/lib/data/super-admin-businesses";
 
 export async function GET() {
@@ -15,7 +15,7 @@ export async function GET() {
 }
 
 export async function POST(request) {
-  const g = await guardSuperAdminJson();
+  const g = await guardPlatformOwnerJson();
   if (g.response) return g.response;
 
   let body;
@@ -43,6 +43,7 @@ export async function POST(request) {
       email: String(body.email).trim(),
       phone: String(body.phone || "").trim(),
       status: body.status,
+      plan: body.plan,
       managerFullName: String(body.managerFullName).trim(),
       managerEmail: String(body.managerEmail).trim(),
       initialPassword: String(body.initialPassword)

@@ -205,6 +205,36 @@ export function BusinessSettingsForm() {
           description={t("manager.settings.section.bookingRulesHint")}
         >
           <ToggleField
+            label={t("manager.settings.rule.preventOverlap")}
+            hint={t("manager.settings.rule.preventOverlapHint")}
+            checked={form.preventOverlappingBookingsEnabled}
+            onChange={(v) => update({ preventOverlappingBookingsEnabled: v })}
+            disabled={saving}
+          />
+
+          <ToggleField
+            label={t("manager.settings.rule.dayLimit")}
+            hint={t("manager.settings.rule.dayLimitHint")}
+            checked={form.maxBookingsPerDayEnabled}
+            onChange={(v) => update({ maxBookingsPerDayEnabled: v })}
+            disabled={saving}
+          />
+          {form.maxBookingsPerDayEnabled ? (
+            <div className="space-y-2 pl-1">
+              <p className="text-xs text-muted-foreground">{t("manager.settings.rule.maxPerDay")}</p>
+              <Input
+                type="number"
+                min={1}
+                max={50}
+                className="max-w-[200px]"
+                value={form.maxBookingsPerDay}
+                onChange={(e) => update({ maxBookingsPerDay: Number(e.target.value) })}
+                disabled={saving}
+              />
+            </div>
+          ) : null}
+
+          <ToggleField
             label={t("manager.settings.rule.weekLimit")}
             hint={t("manager.settings.rule.weekLimitHint")}
             checked={form.maxBookingsPerWeekEnabled}
@@ -247,14 +277,6 @@ export function BusinessSettingsForm() {
               />
             </div>
           ) : null}
-
-          <ToggleField
-            label={t("manager.settings.rule.onePerDay")}
-            hint={t("manager.settings.rule.onePerDayHint")}
-            checked={form.preventSameDayMultipleBookings}
-            onChange={(v) => update({ preventSameDayMultipleBookings: v })}
-            disabled={saving}
-          />
 
           <ToggleField
             label={t("manager.settings.rule.minNotice")}
@@ -329,6 +351,52 @@ export function BusinessSettingsForm() {
             onChange={(v) => update({ allowSameDayBookings: v })}
             disabled={saving}
           />
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted-foreground">{t("manager.settings.rule.bookingWindowMode")}</p>
+            <select
+              className="h-10 w-full max-w-[320px] rounded-md border border-input bg-card px-3 text-sm outline-none ring-primary focus:ring-2"
+              value={form.portalBookingWindowMode}
+              onChange={(e) => update({ portalBookingWindowMode: e.target.value })}
+              disabled={saving}
+            >
+              <option value="rolling">{t("manager.settings.rule.bookingWindowMode.rolling")}</option>
+              <option value="next_week_only">{t("manager.settings.rule.bookingWindowMode.nextWeekOnly")}</option>
+            </select>
+            <p className="text-xs text-muted-foreground">{t("manager.settings.rule.bookingWindowModeHint")}</p>
+          </div>
+
+          <ToggleField
+            label={t("manager.settings.rule.releaseWindow")}
+            hint={t("manager.settings.rule.releaseWindowHint")}
+            checked={form.bookingReleaseWindowEnabled}
+            onChange={(v) => update({ bookingReleaseWindowEnabled: v })}
+            disabled={saving}
+          />
+          {form.bookingReleaseWindowEnabled ? (
+            <div className="grid gap-3 pl-1 sm:grid-cols-2">
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">{t("manager.settings.rule.allowedFrom")}</p>
+                <Input
+                  type="time"
+                  className="max-w-[200px]"
+                  value={form.bookingAllowedFrom}
+                  onChange={(e) => update({ bookingAllowedFrom: e.target.value })}
+                  disabled={saving}
+                />
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">{t("manager.settings.rule.allowedUntil")}</p>
+                <Input
+                  type="time"
+                  className="max-w-[200px]"
+                  value={form.bookingAllowedUntil}
+                  onChange={(e) => update({ bookingAllowedUntil: e.target.value })}
+                  disabled={saving}
+                />
+              </div>
+            </div>
+          ) : null}
         </Section>
 
         <Section

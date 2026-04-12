@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 
 function toUi(row) {
   return {
@@ -8,6 +9,7 @@ function toUi(row) {
     duration: Number(row.duration_minutes),
     price: row.price == null ? null : Number(row.price),
     description: row.description || "",
+    categoryId: row.category_id || null,
     status: row.is_active ? "active" : "inactive",
     is_active: Boolean(row.is_active),
     created_at: row.created_at
@@ -51,6 +53,19 @@ export async function PATCH(request, { params }) {
   if (body.description !== undefined) patch.description = String(body.description || "").trim() || null;
   if (body.status != null) patch.is_active = body.status === "active";
   if (typeof body.is_active === "boolean") patch.is_active = body.is_active;
+  if (body.categoryId !== undefined || body.category_id !== undefined) {
+    const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
+    if (categoryId === null) {
+      return NextResponse.json(
+        { error: "Each service must belong to a category. Please select a category." },
+        { status: 400 }
+      );
+    }
+    const { category, error: cErr } = await findCategoryForBusiness(supabase, business.id, categoryId);
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+    if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+    patch.category_id = categoryId;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "No valid fields." }, { status: 400 });
@@ -61,7 +76,7 @@ export async function PATCH(request, { params }) {
     .update(patch)
     .eq("id", id)
     .eq("business_id", business.id)
-    .select("id, name, duration_minutes, price, description, is_active, created_at")
+    .select("id, name, duration_minutes, price, description, category_id, is_active, created_at")
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 
 /**
- * Premium manager page header: business name as primary title, contextual subtitle.
+ * Manager page header: business name as primary title, contextual subtitle.
  */
 export function PageHeader({ businessName, subtitle, actions = null, className }) {
   const primary = businessName?.trim() || "Business";

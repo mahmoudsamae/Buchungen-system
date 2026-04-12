@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
+import { hasBookingStarted } from "@/lib/booking/booking-lifecycle";
 
 function parseTopics(input) {
   const raw = String(input || "");
@@ -24,6 +25,7 @@ export async function POST(request, { params }) {
   const nextFocus = String(body.nextFocus || body.next_focus || "").trim();
   const topics = parseTopics(body.topics || body.topics_covered);
   const completedAt = body.completed_at ? String(body.completed_at) : new Date().toISOString();
+  const visibleToStudent = body.visible_to_student === true || body.visibleToStudent === true;
 
   if (!notes) {
     return NextResponse.json({ error: "Lesson notes are required." }, { status: 400 });
@@ -40,6 +42,12 @@ export async function POST(request, { params }) {
   if (!booking) return NextResponse.json({ error: "Booking not found." }, { status: 404 });
   if (booking.status !== "confirmed") {
     return NextResponse.json({ error: "Only confirmed bookings can be completed." }, { status: 400 });
+  }
+  if (!hasBookingStarted(booking, business.timezone || "UTC")) {
+    return NextResponse.json(
+      { error: "This lesson cannot be marked completed before its start time." },
+      { status: 400 }
+    );
   }
 
   const payload = {
@@ -63,7 +71,7 @@ export async function POST(request, { params }) {
 
   const { data: updated, error: updateErr } = await supabase
     .from("bookings")
-    .update({ status: "completed" })
+    .update({ status: "completed", notes: visibleToStudent ? notes : null })
     .eq("id", booking.id)
     .eq("business_id", business.id)
     .select("*")

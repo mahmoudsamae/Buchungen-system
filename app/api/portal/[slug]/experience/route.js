@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { fetchTeacherSettingsMerged } from "@/lib/data/teacher-settings";
+import { resolvePortalBookingWindow } from "@/lib/booking/portal-booking-window";
 import { createClient } from "@/lib/supabase/server";
 
 /** Authenticated customer: safe UX flags + policy text for booking flow. */
@@ -15,13 +17,26 @@ export async function GET(request, { params }) {
 
   const { data: mem } = await supabase
     .from("business_users")
-    .select("id")
+    .select("id, primary_instructor_user_id")
     .eq("business_id", biz.id)
     .eq("user_id", user.id)
     .eq("role", "customer")
     .eq("status", "active")
     .maybeSingle();
   if (!mem) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const portalWindow = resolvePortalBookingWindow(biz);
+
+  let teacherAllowsReschedule = true;
+  let teacherAllowsCancel = true;
+  const pid = mem.primary_instructor_user_id || null;
+  if (pid) {
+    const { settings } = await fetchTeacherSettingsMerged(supabase, biz.id, pid);
+    teacherAllowsReschedule = settings.students_can_reschedule_their_own_bookings !== false;
+    teacherAllowsCancel = settings.students_can_cancel_their_own_bookings !== false;
+  }
+
+  const bizAllowsReschedule = biz.allow_customer_reschedule !== false;
+  const bizAllowsCancel = biz.allow_customer_cancellations !== false;
 
   return NextResponse.json({
     booking_policy: biz.booking_policy || "",
@@ -29,7 +44,8 @@ export async function GET(request, { params }) {
     show_booking_policy_at_checkout: biz.show_booking_policy_at_checkout !== false,
     show_cancellation_policy_at_checkout: biz.show_cancellation_policy_at_checkout !== false,
     late_cancellation_notice_text: biz.late_cancellation_notice_text || "",
-    allow_customer_reschedule: biz.allow_customer_reschedule !== false,
-    allow_customer_cancellations: biz.allow_customer_cancellations !== false
+    allow_customer_reschedule: bizAllowsReschedule && teacherAllowsReschedule,
+    allow_customer_cancellations: bizAllowsCancel && teacherAllowsCancel,
+    booking_window: portalWindow
   });
 }

@@ -6,11 +6,12 @@ import { managerNav } from "@/lib/navigation";
 import { ManagerDataProvider } from "@/components/manager/provider";
 import { ManagerDesktopSidebar } from "@/components/navigation/manager-desktop-sidebar";
 import { ManagerNavLinks } from "@/components/navigation/manager-nav-links";
+import { ManagerPlatformAdminNav } from "@/components/navigation/manager-platform-admin-nav";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { cn } from "@/lib/utils";
 
-export function ManagerShell({ business, userId, children }) {
+export function ManagerShell({ business, userId, children, initialPlatformAccess }) {
   const basePath = `/manager/${business.slug}`;
   const { t } = useLanguage();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -38,8 +39,13 @@ export function ManagerShell({ business, userId, children }) {
   }, [mobileOpen]);
 
   return (
-    <ManagerDataProvider initialBusiness={business} userId={userId}>
-      <div className="flex min-h-screen bg-background">
+    <ManagerDataProvider
+      key={business.id}
+      initialBusiness={business}
+      userId={userId}
+      initialPlatformAccess={initialPlatformAccess}
+    >
+      <div className="flex h-[100dvh] max-h-[100dvh] min-h-0 overflow-hidden bg-background">
         <ManagerDesktopSidebar
           brandLabel={t("manager.shell.brand")}
           workspaceLabel={t("manager.shell.workspace")}
@@ -89,6 +95,7 @@ export function ManagerShell({ business, userId, children }) {
             </div>
             <div className="flex-1 overflow-y-auto p-3">
               <ManagerNavLinks items={navItems} basePath={basePath} onNavigate={() => setMobileOpen(false)} />
+              <ManagerPlatformAdminNav className="mt-2 border-border/40" />
             </div>
             <div className="border-t border-border/60 p-4">
               <LanguageToggle className="w-full" />
@@ -111,7 +118,7 @@ export function ManagerShell({ business, userId, children }) {
             <LanguageToggle />
           </header>
 
-          <div className="flex-1">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain">{children}</div>
         </div>
       </div>
     </ManagerDataProvider>

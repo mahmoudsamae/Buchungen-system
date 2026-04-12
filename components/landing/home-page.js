@@ -17,6 +17,11 @@ import {
 } from "lucide-react";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
+import {
+  platformOwnerLoginPath,
+  schoolLoginMarketingPath,
+  teacherLoginMarketingPath
+} from "@/lib/auth/tenant-login-urls";
 
 function FeatureCard({ icon: Icon, title, body }) {
   return (
@@ -63,6 +68,9 @@ export function HomePage() {
   const router = useRouter();
   const { t } = useLanguage();
   const [demoLoading, setDemoLoading] = useState(false);
+  const schoolLoginHref = schoolLoginMarketingPath();
+  const teacherLoginHref = teacherLoginMarketingPath();
+  const platformLoginHref = platformOwnerLoginPath();
 
   const goDemo = () => {
     setDemoLoading(true);
@@ -135,7 +143,13 @@ export function HomePage() {
           <div className="flex items-center gap-3">
             <LanguageToggle />
             <Link
-              href="/business/login"
+              href={platformLoginHref}
+              className="hidden text-sm font-medium text-muted-foreground hover:text-foreground md:inline"
+            >
+              {t("landing.header.platformLogin")}
+            </Link>
+            <Link
+              href={schoolLoginHref}
               className="hidden text-sm font-medium text-muted-foreground hover:text-foreground sm:inline"
             >
               {t("landing.hero.ctaBusiness")}
@@ -147,6 +161,40 @@ export function HomePage() {
             >
               {t("landing.hero.ctaDemo")}
             </button>
+            <div
+              className="flex flex-wrap items-center gap-1.5 border-l border-border/60 pl-2 sm:pl-3"
+              aria-label="Test access (development)"
+            >
+              <span className="hidden text-[10px] font-medium uppercase tracking-wide text-muted-foreground xl:inline">
+                Test Access
+              </span>
+              <div className="flex flex-wrap items-center gap-1">
+                <Link
+                  href="/super-admin"
+                  className="rounded-md border border-border/70 bg-background/60 px-2 py-1 text-[11px] font-medium text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-muted/50 hover:text-foreground"
+                >
+                  Platform
+                </Link>
+                <Link
+                  href={schoolLoginHref}
+                  className="rounded-md border border-border/70 bg-background/60 px-2 py-1 text-[11px] font-medium text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-muted/50 hover:text-foreground"
+                >
+                  School
+                </Link>
+                <Link
+                  href={teacherLoginHref}
+                  className="rounded-md border border-border/70 bg-background/60 px-2 py-1 text-[11px] font-medium text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-muted/50 hover:text-foreground"
+                >
+                  Teacher
+                </Link>
+                <Link
+                  href="/portal"
+                  className="rounded-md border border-border/70 bg-background/60 px-2 py-1 text-[11px] font-medium text-muted-foreground shadow-sm transition hover:border-primary/30 hover:bg-muted/50 hover:text-foreground"
+                >
+                  Student
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -174,7 +222,7 @@ export function HomePage() {
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
               </button>
               <Link
-                href="/business/login"
+                href={schoolLoginHref}
                 className="inline-flex h-12 items-center justify-center rounded-xl border border-border/80 bg-card/80 px-6 text-sm font-semibold shadow-sm backdrop-blur transition hover:bg-muted/80"
               >
                 {t("landing.hero.ctaBusiness")}
@@ -316,7 +364,7 @@ export function HomePage() {
                 {t("landing.hero.ctaDemo")}
               </button>
               <Link
-                href="/business/login"
+                href={schoolLoginHref}
                 className="inline-flex h-12 items-center justify-center rounded-xl border border-border bg-card px-6 text-sm font-semibold"
               >
                 {t("landing.hero.ctaBusiness")}
@@ -347,8 +395,11 @@ export function HomePage() {
                 <Link href="#pricing" className="text-muted-foreground hover:text-foreground">
                   {t("landing.footer.pricing")}
                 </Link>
-                <Link href="/business/login" className="text-muted-foreground hover:text-foreground">
+                <Link href={schoolLoginHref} className="text-muted-foreground hover:text-foreground">
                   {t("landing.footer.businessLogin")}
+                </Link>
+                <Link href={platformLoginHref} className="text-muted-foreground hover:text-foreground">
+                  {t("landing.header.platformLogin")}
                 </Link>
               </div>
             </div>

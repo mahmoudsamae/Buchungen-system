@@ -10,15 +10,20 @@ import { StatusBadge } from "@/components/shared/status-badge";
 export default function SuperAdminDashboardPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const res = await fetch("/api/super-admin/state");
-      if (!res.ok) {
+      const [stRes, snapRes] = await Promise.all([fetch("/api/super-admin/session"), fetch("/api/super-admin/state")]);
+      if (stRes.ok) {
+        const st = await stRes.json().catch(() => ({}));
+        setIsOwner(Boolean(st.isPlatformOwner));
+      }
+      if (!snapRes.ok) {
         setError("Unable to load platform state.");
         return;
       }
-      setData(await res.json());
+      setData(await snapRes.json());
     })();
   }, []);
 
@@ -32,10 +37,10 @@ export default function SuperAdminDashboardPage() {
 
   const { totals, recentBusinesses, recentActivity } = data;
   const stats = [
-    { label: "Total Businesses", value: String(totals.businesses), change: "All tenants" },
+    { label: "Total businesses", value: String(totals.businesses), change: "All tenants" },
     { label: "Active", value: String(totals.active), change: "Operating" },
     { label: "Suspended", value: String(totals.suspended), change: "Restricted" },
-    { label: "Total Managers", value: String(totals.managers), change: "One per business" },
+    { label: "Managers", value: String(totals.managers), change: "Business managers" },
     { label: "Platform Bookings", value: String(totals.bookings), change: "Across all" },
     { label: "Platform Users", value: String(totals.users), change: "All roles" }
   ];
@@ -50,8 +55,28 @@ export default function SuperAdminDashboardPage() {
     <main className="space-y-6 p-4 md:p-6">
       <div>
         <h1 className="text-lg font-semibold md:text-xl">Platform Dashboard</h1>
-        <p className="text-xs text-muted-foreground">Aggregate view across all businesses</p>
+        <p className="text-xs text-muted-foreground">Aggregate view across all business tenants</p>
       </div>
+
+      {isOwner ? (
+        <div className="rounded-lg border border-primary/25 bg-primary/5 px-4 py-3 text-sm">
+          <p className="font-medium text-foreground">Platform owner</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Use the owner workspace to invite platform admins, suspend access, and create or change businesses.
+          </p>
+          <Link href="/super-admin/owner" className="mt-2 inline-block text-xs font-semibold text-primary hover:underline">
+            Open owner workspace →
+          </Link>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">View-only platform admin</p>
+          <p className="mt-1 text-xs">
+            You can review platform metrics and open businesses, but creating tenants, editing records, and security actions are
+            reserved for the platform owner.
+          </p>
+        </div>
+      )}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {stats.map((s) => (
@@ -60,7 +85,7 @@ export default function SuperAdminDashboardPage() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <ChartPreview title="Business status mix" points={bars} />
+        <ChartPreview title="Tenant status mix" points={bars} />
         <Card>
           <CardHeader>
             <CardTitle>Recent businesses</CardTitle>

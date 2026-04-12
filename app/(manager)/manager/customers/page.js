@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
 import { requireManagerContext } from "@/lib/auth/session";
+import { schoolLoginMarketingPath } from "@/lib/auth/tenant-login-urls";
 
 export default async function LegacyManagerCustomersRedirect() {
   const ctx = await requireManagerContext();
-  if (!ctx) redirect("/business/login");
-  redirect(`/manager/${ctx.business.slug}/customers`);
+  if (!ctx) redirect(schoolLoginMarketingPath());
+  redirect(`/manager/${ctx.business.slug}/students`);
 }

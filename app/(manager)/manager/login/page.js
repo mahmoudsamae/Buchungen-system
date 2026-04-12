@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
+import { schoolLoginMarketingPath } from "@/lib/auth/tenant-login-urls";
 
+/** @deprecated Use `/login/school/[slug]`. */
 export default async function LegacyManagerLoginPage({ searchParams }) {
   const sp = await searchParams;
   const qp = new URLSearchParams();
@@ -11,5 +13,6 @@ export default async function LegacyManagerLoginPage({ searchParams }) {
     }
   }
   const query = qp.toString();
-  redirect(query ? `/business/login?${query}` : "/business/login");
+  const base = schoolLoginMarketingPath();
+  redirect(query ? `${base}?${query}` : base);
 }

@@ -10,7 +10,8 @@ function Form() {
   const { slug } = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || `/portal/${slug}/book`;
+  const defaultBook = `/portal/${slug}/book`;
+  const nextPath = searchParams.get("next") || defaultBook;
   const err = searchParams.get("error");
 
   const [email, setEmail] = useState("");
@@ -37,7 +38,11 @@ function Form() {
         setLoading(false);
         return;
       }
-      router.push(nextPath.startsWith(`/portal/${slug}`) ? nextPath : `/portal/${slug}/book`);
+      const safe =
+        nextPath.startsWith(`/portal/${slug}/`) || nextPath.startsWith(`/student/${slug}/`)
+          ? nextPath
+          : defaultBook;
+      router.push(safe);
       router.refresh();
     } catch (ex) {
       setError(ex.message || "Error");

@@ -7,9 +7,12 @@ import { createClient } from "@/lib/supabase/client";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { LanguageToggle } from "@/components/i18n/language-toggle";
 import { cn } from "@/lib/utils";
-import { CalendarDays, LayoutGrid, UserRound } from "lucide-react";
+import { CalendarDays, Home, LayoutGrid, UserRound } from "lucide-react";
 
-export function PortalShell({ slug, children }) {
+/**
+ * @param {{ slug: string, children: React.ReactNode, baseSegment?: "portal" | "student" }} props
+ */
+export function PortalShell({ slug, children, baseSegment = "portal" }) {
   const pathname = usePathname();
   const { t } = useLanguage();
   const [displayName, setDisplayName] = useState("");
@@ -37,12 +40,16 @@ export function PortalShell({ slug, children }) {
     return <div className="min-h-screen bg-background">{children}</div>;
   }
 
-  const base = `/portal/${slug}`;
-  const links = [
+  const base = `/${baseSegment}/${slug}`;
+  const coreLinks = [
     { href: `${base}/book`, label: t("portal.nav.book"), icon: LayoutGrid },
     { href: `${base}/appointments`, label: t("portal.nav.appointments"), icon: CalendarDays },
     { href: `${base}/profile`, label: t("portal.nav.profile"), icon: UserRound }
   ];
+  const links =
+    baseSegment === "student"
+      ? [{ href: base, label: t("portal.nav.home"), icon: Home }, ...coreLinks]
+      : coreLinks;
 
   return (
     <div className="min-h-screen bg-background">

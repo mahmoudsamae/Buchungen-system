@@ -19,7 +19,7 @@ import { localDateString, normalizeBookingDate } from "@/lib/manager/booking-dat
 import { ManualBookingDialog } from "@/components/manager/manual-booking-dialog";
 import { RescheduleBookingDialog } from "@/components/manager/reschedule-booking-dialog";
 import { CompleteLessonDialog } from "@/components/manager/complete-lesson-dialog";
-import { BOOKING_TERMINAL_STATUSES } from "@/lib/manager/booking-constants";
+import { canRestoreCancelledOrNoShow, canRestoreCompleted, hasBookingStarted } from "@/lib/booking/booking-lifecycle";
 
 export default function TodayPage() {
   const { bookings, bookingActions, customers, services, business } = useManager();
@@ -68,7 +68,19 @@ export default function TodayPage() {
               </p>
             ) : (
               todayBookings.map((item) => {
-                const locked = BOOKING_TERMINAL_STATUSES.includes(item.status);
+                const started = hasBookingStarted(
+                  { booking_date: item.date, start_time: item.time },
+                  business?.timezone || "UTC"
+                );
+                const canRestore = canRestoreCancelledOrNoShow(
+                  { booking_date: item.date, start_time: item.time },
+                  business?.timezone || "UTC"
+                );
+                const canRestoreDone = canRestoreCompleted(
+                  { booking_date: item.date, start_time: item.time },
+                  business?.timezone || "UTC"
+                );
+                const status = String(item.status || "");
                 return (
                   <div key={item.id} className="rounded-xl border border-border/60 bg-muted/5 p-4 transition hover:border-primary/20">
                     <div className="flex items-start justify-between gap-3">
@@ -80,44 +92,65 @@ export default function TodayPage() {
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-center">
                         <StatusBadge value={item.status} />
-                        {!locked ? (
+                        {status !== "expired" ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-muted/60">
                               Actions
                               <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-48">
-                              {item.status === "pending" ? (
+                              {status === "pending" ? (
                                 <>
-                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "confirmed")}>
-                                    Accept booking
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "confirmed")}>Confirm</DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled_by_manager")}>Cancel</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onSelect={() => setRescheduleFor(item)}>Reschedule…</DropdownMenuItem>
+                                </>
+                              ) : null}
+                              {status === "confirmed" && !started ? (
+                                <>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled_by_manager")}>Cancel</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem onSelect={() => setRescheduleFor(item)}>Reschedule…</DropdownMenuItem>
+                                </>
+                              ) : null}
+                              {status === "confirmed" && started ? (
+                                <>
+                                  <DropdownMenuItem onSelect={() => setCompleteFor(item)}>Mark completed</DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "no_show")}>Mark no-show</DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled_by_manager")}>Cancel</DropdownMenuItem>
+                                </>
+                              ) : null}
+                              {status === "no_show" ? (
+                                <>
+                                  <DropdownMenuItem disabled={!canRestore} onSelect={() => bookingActions.updateStatus(item.id, "confirmed")}>
+                                    Restore to confirmed
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled")}>
-                                    Cancel booking
+                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled_by_manager")}>
+                                    Cancel
+                                  </DropdownMenuItem>
+                                </>
+                              ) : null}
+                              {(status === "cancelled_by_manager" || status === "cancelled_by_user") ? (
+                                <>
+                                  <DropdownMenuItem disabled={!canRestore} onSelect={() => bookingActions.updateStatus(item.id, "confirmed")}>
+                                    Restore to confirmed
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem onSelect={() => setRescheduleFor(item)}>Reschedule…</DropdownMenuItem>
                                 </>
                               ) : null}
-                              {item.status === "confirmed" ? (
-                                <>
-                                  <DropdownMenuItem onSelect={() => setCompleteFor(item)}>Complete lesson</DropdownMenuItem>
-                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "no_show")}>
-                                    Mark no-show
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onSelect={() => bookingActions.updateStatus(item.id, "cancelled")}>
-                                    Cancel booking
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem onSelect={() => setRescheduleFor(item)}>Reschedule…</DropdownMenuItem>
-                                </>
+                              {status === "completed" ? (
+                                <DropdownMenuItem disabled={!canRestoreDone} onSelect={() => bookingActions.updateStatus(item.id, "confirmed")}>
+                                  Restore to confirmed
+                                </DropdownMenuItem>
                               ) : null}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         ) : null}
                       </div>
                     </div>
-                    {locked ? (
+                    {status === "expired" ? (
                       <p className="mt-2 text-xs text-muted-foreground">No workflow actions for terminal status.</p>
                     ) : null}
                   </div>
@@ -135,6 +168,7 @@ export default function TodayPage() {
         services={services}
         defaultDate={today}
         onSave={(payload) => bookingActions.save(payload)}
+        loadAvailableUpcomingSlots={bookingActions.availableUpcomingSlots}
       />
 
       <RescheduleBookingDialog
@@ -142,6 +176,8 @@ export default function TodayPage() {
         onClose={() => setRescheduleFor(null)}
         booking={rescheduleFor}
         onReschedule={(id, payload) => bookingActions.reschedule(id, payload)}
+        loadAvailableSlots={bookingActions.availableSlots}
+        loadAvailableDates={bookingActions.availableDates}
       />
 
       <CompleteLessonDialog

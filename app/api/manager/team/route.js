@@ -19,18 +19,53 @@ function mapMember(row) {
 export async function GET(request) {
   const g = await guardManagerJson(request);
   if (g.response) return g.response;
-  const { business, supabase } = g.ctx;
+  const { business } = g.ctx;
 
-  const { data: rows, error } = await supabase
+  /** Same pattern as GET /api/manager/customers: session client cannot list other members under RLS. */
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch (e) {
+    return NextResponse.json({ error: e.message || "Server misconfigured." }, { status: 500 });
+  }
+
+  const { data: rows, error } = await admin
     .from("business_users")
-    .select("id, user_id, role, status, created_at, profiles(full_name, email, phone)")
+    .select("id, user_id, role, status, created_at")
     .eq("business_id", business.id)
     .in("role", ["manager", "staff"])
     .order("role");
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    console.error("[manager/team GET] business_users:", error.message, error.code, error.details);
+    return NextResponse.json(
+      { error: error.message || "Failed to load team.", code: error.code, details: error.details },
+      { status: 400 }
+    );
+  }
 
-  const users = (rows || []).map(mapMember);
+  const list = rows || [];
+  const userIds = list.map((r) => r.user_id);
+  const profileById = new Map();
+
+  if (userIds.length) {
+    const { data: profs, error: pErr } = await admin
+      .from("profiles")
+      .select("id, full_name, email, phone")
+      .in("id", userIds);
+    if (pErr) {
+      console.error("[manager/team GET] profiles:", pErr.message, pErr.code, pErr.details);
+      return NextResponse.json(
+        { error: pErr.message || "Failed to load profiles.", code: pErr.code, details: pErr.details },
+        { status: 400 }
+      );
+    }
+    for (const p of profs || []) {
+      profileById.set(String(p.id), p);
+    }
+  }
+
+  const users = list.map((row) => mapMember({ ...row, profiles: profileById.get(String(row.user_id)) ?? null }));
   users.sort((a, b) => {
     if (a.role === "manager" && b.role !== "manager") return -1;
     if (a.role !== "manager" && b.role === "manager") return 1;

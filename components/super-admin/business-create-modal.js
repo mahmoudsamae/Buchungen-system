@@ -11,15 +11,55 @@ const emptyForm = () => ({
   email: "",
   phone: "",
   status: "active",
+  plan: "free",
   managerFullName: "",
   managerEmail: "",
   initialPassword: ""
 });
 
+const COPY = {
+  school: {
+    title: "Create tenant",
+    lead:
+      "Creates a business tenant, the manager user, and a business_users row with role manager. The manager signs in at /login/school/<slug> (school admin URL for that tenant).",
+    sectionTenant: "Business",
+    nameLabel: "Business name",
+    namePlaceholder: "Acme Studio",
+    emailLabel: "Business email",
+    emailPlaceholder: "hello@business.com",
+    sectionManager: "Manager login",
+    managerLead: (
+      <>
+        This person signs in at{" "}
+        <span className="font-mono text-foreground/90">{"/login/school/<slug>"}</span> for this school (not the platform console).
+      </>
+    ),
+    submit: "Create business"
+  },
+  business: {
+    title: "Add business",
+    lead: "Create a tenant and the manager account used for the business dashboard.",
+    sectionTenant: "Business",
+    nameLabel: "Business name",
+    namePlaceholder: "Acme Studio",
+    emailLabel: "Business email",
+    emailPlaceholder: "hello@business.com",
+    sectionManager: "Manager login",
+    managerLead: (
+      <>
+        This person signs in at <span className="font-mono text-foreground/90">{"/login/school/<slug>"}</span> for this business.
+      </>
+    ),
+    submit: "Create business"
+  }
+};
+
 /**
  * Full-screen overlay dialog to create a tenant + manager via POST /api/super-admin/businesses.
+ * @param {{ variant?: 'school' | 'business' }} props `school` (default) matches driving-school product language.
  */
-export function BusinessCreateModal({ open, onClose, onCreated }) {
+export function BusinessCreateModal({ open, onClose, onCreated, variant = "school" }) {
+  const c = COPY[variant] || COPY.school;
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -80,8 +120,8 @@ export function BusinessCreateModal({ open, onClose, onCreated }) {
         <div className="shrink-0 border-b px-5 py-4 sm:px-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-lg font-semibold tracking-tight">Add business</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Create a tenant and the manager account used for the business dashboard.</p>
+              <h2 className="text-lg font-semibold tracking-tight">{c.title}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{c.lead}</p>
             </div>
             <button
               type="button"
@@ -97,15 +137,15 @@ export function BusinessCreateModal({ open, onClose, onCreated }) {
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
             <div className="space-y-6">
               <section className="space-y-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Business</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{c.sectionTenant}</h3>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 sm:col-span-2">
-                    <span className="text-xs text-muted-foreground">Business name</span>
+                    <span className="text-xs text-muted-foreground">{c.nameLabel}</span>
                     <Input
                       required
                       value={form.name}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      placeholder="Acme Studio"
+                      placeholder={c.namePlaceholder}
                       autoComplete="organization"
                     />
                   </label>
@@ -127,14 +167,22 @@ export function BusinessCreateModal({ open, onClose, onCreated }) {
                       <option value="suspended">Suspended</option>
                     </Select>
                   </label>
+                  <label className="space-y-1.5">
+                    <span className="text-xs text-muted-foreground">Plan</span>
+                    <Select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })}>
+                      <option value="free">Free</option>
+                      <option value="basic">Basic (€29/mo)</option>
+                      <option value="pro">Pro (€79/mo)</option>
+                    </Select>
+                  </label>
                   <label className="space-y-1.5 sm:col-span-2">
-                    <span className="text-xs text-muted-foreground">Business email</span>
+                    <span className="text-xs text-muted-foreground">{c.emailLabel}</span>
                     <Input
                       required
                       type="email"
                       value={form.email}
                       onChange={(e) => setForm({ ...form, email: e.target.value })}
-                      placeholder="hello@business.com"
+                      placeholder={c.emailPlaceholder}
                       autoComplete="email"
                     />
                   </label>
@@ -151,10 +199,8 @@ export function BusinessCreateModal({ open, onClose, onCreated }) {
               </section>
 
               <section className="space-y-3 border-t border-border/60 pt-6">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Manager login</h3>
-                <p className="text-xs text-muted-foreground">
-                  This person signs in at <span className="font-mono text-foreground/90">/manager/login</span> to run this business.
-                </p>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{c.sectionManager}</h3>
+                <p className="text-xs text-muted-foreground">{c.managerLead}</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1.5 sm:col-span-2">
                     <span className="text-xs text-muted-foreground">Full name</span>
@@ -216,7 +262,7 @@ export function BusinessCreateModal({ open, onClose, onCreated }) {
                 disabled={loading}
                 className="rounded-md bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-soft transition hover:opacity-95 disabled:opacity-60"
               >
-                {loading ? "Creating…" : "Create business"}
+                {loading ? "Creating…" : c.submit}
               </button>
             </div>
           </div>

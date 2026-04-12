@@ -2,33 +2,38 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import { customerUiBasePath } from "@/lib/portal/customer-base-path";
 import { CalendarClock, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { createClient } from "@/lib/supabase/client";
+import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
 
 export default function PortalAppointmentsPage() {
   const { slug } = useParams();
+  const pathname = usePathname();
+  const base = customerUiBasePath(pathname, slug);
   const router = useRouter();
   const { t, locale } = useLanguage();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [displayName, setDisplayName] = useState("");
   const [experience, setExperience] = useState(null);
+  const [publicNotes, setPublicNotes] = useState([]);
   const [toast, setToast] = useState("");
   const [cancelingId, setCancelingId] = useState(null);
 
   const loadBookings = useCallback(async () => {
     const res = await fetch(`/api/portal/${slug}/bookings`);
     if (res.status === 401) {
-      router.replace(`/portal/${slug}/login?next=/portal/${slug}/appointments`);
+      router.replace(`${base}/login?next=${encodeURIComponent(`${base}/appointments`)}`);
       return;
     }
     const data = await res.json();
     setRows(data.bookings || []);
-  }, [slug, router]);
+  }, [slug, router, base]);
 
   useEffect(() => {
     (async () => {
@@ -42,6 +47,16 @@ export default function PortalAppointmentsPage() {
     (async () => {
       const res = await fetch(`/api/portal/${slug}/experience`);
       if (res.ok) setExperience(await res.json());
+    })();
+  }, [slug]);
+
+  useEffect(() => {
+    (async () => {
+      const res = await fetch(`/api/portal/${slug}/notes`);
+      if (res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setPublicNotes(Array.isArray(j.notes) ? j.notes : []);
+      }
     })();
   }, [slug]);
 
@@ -110,12 +125,45 @@ export default function PortalAppointmentsPage() {
           ) : null}
         </div>
         <Link
-          href={`/portal/${slug}/book`}
+          href={`${base}/book`}
           className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-md transition hover:brightness-110"
         >
           {t("portal.appointments.bookCta")}
         </Link>
       </div>
+
+      {publicNotes.length ? (
+        <div className="mb-6 rounded-2xl border border-primary/20 bg-gradient-to-b from-primary/10 to-card p-5 shadow-sm">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
+            {t("portal.notes.title")}
+          </p>
+          <div className="mt-3 space-y-2">
+            {publicNotes.slice(0, 5).map((n) => (
+              <Card key={n.id} className="border-border/70 bg-card/80">
+                <div className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{n.title || t("portal.notes.defaultTitle")}</p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{n.content}</p>
+                    </div>
+                    {n.is_pinned ? (
+                      <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                        {t("portal.notes.pinned")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {String(n.created_at || "").replace("T", " ").slice(0, 16)}
+                  </p>
+                </div>
+              </Card>
+            ))}
+          </div>
+          {publicNotes.length > 5 ? (
+            <p className="mt-3 text-xs text-muted-foreground">{t("portal.notes.more", { count: String(publicNotes.length - 5) })}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="flex items-center gap-2 rounded-xl border border-dashed border-border/60 bg-muted/10 px-4 py-12 text-sm text-muted-foreground">
@@ -129,7 +177,7 @@ export default function PortalAppointmentsPage() {
           </div>
           <p className="mt-4 text-lg font-semibold">{t("portal.appointments.empty")}</p>
           <Link
-            href={`/portal/${slug}/book`}
+            href={`${base}/book`}
             className="mt-6 inline-flex h-11 items-center rounded-xl bg-primary px-5 text-sm font-semibold text-primary-foreground"
           >
             {t("portal.appointments.bookCta")}
@@ -168,7 +216,7 @@ export default function PortalAppointmentsPage() {
                     <StatusBadge value={b.status} />
                     {experience &&
                     experience.allow_customer_cancellations &&
-                    ["pending", "confirmed"].includes(String(b.status)) ? (
+                    ["pending", "confirmed"].includes(normalizeBookingStatus(String(b.status)) || String(b.status)) ? (
                       <button
                         type="button"
                         disabled={cancelingId === b.id}

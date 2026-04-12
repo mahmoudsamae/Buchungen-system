@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
+import { claimFirstPlatformOwnerIfNeeded } from "@/lib/platform/bootstrap-platform-owner";
+import { platformAccessFromProfile } from "@/lib/platform/access";
 import {
   businessRowToSettings,
   pickDefined,
@@ -10,11 +12,25 @@ import {
 export async function GET(request) {
   const g = await guardManagerJson(request);
   if (g.response) return g.response;
-  const { business } = g.ctx;
+  const { business, user, supabase } = g.ctx;
+
+  let { data: profileRow } = await supabase
+    .from("profiles")
+    .select("platform_role, is_platform_super_admin, platform_staff_suspended")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const access = platformAccessFromProfile(profileRow);
+  if (access.canAccessPlatformAdmin) {
+    await claimFirstPlatformOwnerIfNeeded(user.id);
+    const { data: fresh } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    if (fresh) profileRow = fresh;
+  }
 
   return NextResponse.json({
     business,
-    settings: businessRowToSettings(business)
+    settings: businessRowToSettings(business),
+    platformAccess: platformAccessFromProfile(profileRow)
   });
 }
 

@@ -9,7 +9,8 @@ const emptyForm = {
   notes: "",
   topics: "",
   nextFocus: "",
-  completedAt: ""
+  completedAt: "",
+  visibleToStudent: false
 };
 
 export function CompleteLessonDialog({ open, booking, onClose, onSubmit }) {
@@ -25,7 +26,7 @@ export function CompleteLessonDialog({ open, booking, onClose, onSubmit }) {
     const d = String(now.getDate()).padStart(2, "0");
     const h = String(now.getHours()).padStart(2, "0");
     const mm = String(now.getMinutes()).padStart(2, "0");
-    setForm({ notes: "", topics: "", nextFocus: "", completedAt: `${y}-${m}-${d}T${h}:${mm}` });
+    setForm({ notes: "", topics: "", nextFocus: "", completedAt: `${y}-${m}-${d}T${h}:${mm}`, visibleToStudent: false });
     setError("");
     setSaving(false);
   }, [open, booking?.id]);
@@ -48,7 +49,8 @@ export function CompleteLessonDialog({ open, booking, onClose, onSubmit }) {
               notes,
               topics: form.topics,
               nextFocus: form.nextFocus,
-              completed_at: form.completedAt ? new Date(form.completedAt).toISOString() : new Date().toISOString()
+              completed_at: form.completedAt ? new Date(form.completedAt).toISOString() : new Date().toISOString(),
+              visible_to_student: Boolean(form.visibleToStudent)
             });
             setSaving(false);
             if (ok) onClose();
@@ -103,6 +105,15 @@ export function CompleteLessonDialog({ open, booking, onClose, onSubmit }) {
               onChange={(e) => setForm((f) => ({ ...f, completedAt: e.target.value }))}
             />
           </div>
+
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={Boolean(form.visibleToStudent)}
+              onChange={(e) => setForm((f) => ({ ...f, visibleToStudent: e.target.checked }))}
+            />
+            Visible to student
+          </label>
 
           {error ? <p className="text-xs text-danger">{error}</p> : null}
 

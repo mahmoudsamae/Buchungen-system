@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 
 function mapCustomer(row, profile) {
   const p = profile;
@@ -14,7 +15,8 @@ function mapCustomer(row, profile) {
     phone: p != null && typeof p.phone === "string" ? p.phone : "",
     status: row.status,
     createdAt: row.created_at?.slice(0, 10) ?? "",
-    internalNote: row.internal_note || ""
+    internalNote: row.internal_note || "",
+    categoryId: row.category_id || null
   };
 }
 
@@ -33,7 +35,7 @@ export async function GET(request) {
 
   const { data: rows, error } = await admin
     .from("business_users")
-    .select("id, user_id, status, created_at, internal_note")
+    .select("id, user_id, status, created_at, internal_note, category_id")
     .eq("business_id", business.id)
     .eq("role", "customer")
     .order("created_at", { ascending: false });
@@ -92,6 +94,13 @@ export async function POST(request) {
   const fullName = String(body.fullName || "").trim();
   const phone = body.phone ? String(body.phone).trim() : "";
   const password = String(body.password || "");
+  const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
+  if (categoryId !== undefined && categoryId !== null) {
+    const { category, error: cErr } = await findCategoryForBusiness(admin, business.id, categoryId);
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+    if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+  }
+
 
   if (!email || !fullName) {
     return NextResponse.json({ error: "fullName and email are required." }, { status: 400 });
@@ -137,9 +146,10 @@ export async function POST(request) {
       business_id: business.id,
       user_id: userId,
       role: "customer",
-      status: "active"
+      status: "active",
+      category_id: categoryId === undefined ? null : categoryId
     })
-    .select("id, user_id, status, created_at")
+    .select("id, user_id, status, created_at, internal_note, category_id")
     .single();
 
   if (buErr) {

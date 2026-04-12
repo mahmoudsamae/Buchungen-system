@@ -2,28 +2,62 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { localDateString, normalizeBookingDate } from "@/lib/manager/booking-date-utils";
+import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
 import { businessRowToSettings } from "@/lib/manager/business-settings";
 import { managerFetch } from "@/lib/manager/manager-fetch";
+import { platformAccessFromProfile } from "@/lib/platform/access";
 import { useLanguage } from "@/components/i18n/language-provider";
+import { toast as sonnerToast, Toaster } from "sonner";
 
 const ManagerContext = createContext(null);
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-export function ManagerDataProvider({ children, initialBusiness, userId }) {
+export function ManagerDataProvider({ children, initialBusiness, userId, initialPlatformAccess }) {
   const { t } = useLanguage();
   const [business, setBusiness] = useState(initialBusiness);
+  const [platformAccess, setPlatformAccess] = useState(
+    () => initialPlatformAccess ?? platformAccessFromProfile(null)
+  );
   const [bookings, setBookings] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [services, setServices] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [rules, setRules] = useState([]);
   const [settings, setSettings] = useState(() => businessRowToSettings(initialBusiness));
-  const [toast, setToast] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const notify = useCallback((message) => {
-    setToast(message);
-    setTimeout(() => setToast(""), 2400);
+  const notify = useCallback((message, opts = {}) => {
+    const tone = opts.tone || "info";
+    const duration = typeof opts.duration === "number" ? opts.duration : tone === "error" ? 6500 : 2800;
+    if (tone === "error") {
+      sonnerToast.error("Action blocked", { description: message, duration });
+      return;
+    }
+    if (tone === "success") {
+      sonnerToast.success(message, { duration });
+      return;
+    }
+    sonnerToast(message, { duration });
+  }, []);
+
+  const bookingStatusErrorMessage = useCallback((status, errorBody) => {
+    const fallback =
+      status === "completed"
+        ? "This booking cannot be marked as completed yet.\nWhy: the lesson has not started.\nNext step: keep it confirmed or cancel/reschedule for now."
+        : status === "confirmed"
+          ? "This booking cannot be restored right now.\nWhy: the correction window may have expired.\nNext step: reschedule or create a new booking."
+          : "This status update could not be applied.\nWhy: the requested transition is not allowed right now.\nNext step: choose an allowed action from the menu.";
+    if (!errorBody || typeof errorBody.error !== "string" || !errorBody.error.trim()) return fallback;
+    return errorBody.error;
+  }, []);
+
+  const bookingStatusSuccessMessage = useCallback((status) => {
+    if (status === "confirmed") return "Booking restored to confirmed.";
+    if (status === "completed") return "Booking marked as completed.";
+    if (status === "no_show") return "Booking marked as no-show.";
+    if (status === "cancelled_by_manager" || status === "cancelled_by_user") return "Booking cancelled.";
+    return `Booking status updated to ${status}.`;
   }, []);
 
   const businessSlug = business?.slug ?? "";
@@ -37,10 +71,11 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       api("/api/manager/bookings"),
       api("/api/manager/customers"),
       api("/api/manager/services"),
+      api("/api/manager/categories"),
       api("/api/manager/availability")
     ]);
 
-    const [bRes, bookRes, custRes, serviceRes, ruleRes] = results;
+    const [bRes, bookRes, custRes, serviceRes, categoryRes, ruleRes] = results;
     try {
       if (bRes.status === "fulfilled") {
         if (bRes.value.ok) {
@@ -48,6 +83,7 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
           if (b.business) setBusiness(b.business);
           if (b.settings) setSettings(b.settings);
           else if (b.business) setSettings(businessRowToSettings(b.business));
+          if (b.platformAccess) setPlatformAccess(b.platformAccess);
         }
       } else {
         notify("Could not load business details.");
@@ -59,6 +95,7 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
           setBookings(
             (j.bookings || []).map((b) => ({
               ...b,
+              status: normalizeBookingStatus(b.status) || b.status,
               date: normalizeBookingDate(b.date)
             }))
           );
@@ -97,6 +134,20 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       } else {
         console.error("[manager] services fetch rejected:", serviceRes.reason);
         setServices([]);
+      }
+
+      if (categoryRes.status === "fulfilled") {
+        if (categoryRes.value.ok) {
+          const j = await categoryRes.value.json();
+          setCategories(j.categories || []);
+        } else {
+          const errBody = await categoryRes.value.json().catch(() => ({}));
+          console.error("[manager] categories request failed:", errBody.error || categoryRes.value.status);
+          setCategories([]);
+        }
+      } else {
+        console.error("[manager] categories fetch rejected:", categoryRes.reason);
+        setCategories([]);
       }
 
       if (ruleRes.status === "fulfilled") {
@@ -180,11 +231,11 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        notify(e.error || "Update failed.");
+        notify(bookingStatusErrorMessage(status, e), { tone: "error" });
         return;
       }
       await loadAll();
-      notify(`Booking updated to ${status}.`);
+      notify(bookingStatusSuccessMessage(status), { tone: "success" });
     },
     reschedule: async (id, { date, time }) => {
       const res = await managerFetch(businessSlug, `/api/manager/bookings/${id}/reschedule`, {
@@ -194,12 +245,60 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        notify(e.error || "Reschedule failed.");
+        notify(e.error || "Reschedule failed.", { tone: "error" });
         return false;
       }
       await loadAll();
-      notify("Booking rescheduled.");
+      notify("Booking rescheduled.", { tone: "success" });
       return true;
+    },
+    availableSlots: async ({ date, customerUserId, serviceId, excludeBookingId }) => {
+      const qs = new URLSearchParams({
+        date: String(date || ""),
+        customerUserId: String(customerUserId || ""),
+        serviceId: String(serviceId || "")
+      });
+      if (excludeBookingId) qs.set("excludeBookingId", String(excludeBookingId));
+      const res = await managerFetch(businessSlug, `/api/manager/bookings/available-slots?${qs.toString()}`);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Could not load available slots.", { tone: "error" });
+        return { ok: false, slots: [] };
+      }
+      const j = await res.json().catch(() => ({}));
+      return { ok: true, slots: j.slots || [], reason: j.reason || null };
+    },
+    availableDates: async ({ customerUserId, serviceId, fromDate, horizonDays = 30, excludeBookingId }) => {
+      const qs = new URLSearchParams({
+        customerUserId: String(customerUserId || ""),
+        serviceId: String(serviceId || ""),
+        horizonDays: String(horizonDays || 30)
+      });
+      if (fromDate) qs.set("fromDate", String(fromDate));
+      if (excludeBookingId) qs.set("excludeBookingId", String(excludeBookingId));
+      const res = await managerFetch(businessSlug, `/api/manager/bookings/available-dates?${qs.toString()}`);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Could not load available dates.", { tone: "error" });
+        return { ok: false, dates: [] };
+      }
+      const j = await res.json().catch(() => ({}));
+      return { ok: true, dates: j.dates || [] };
+    },
+    availableUpcomingSlots: async ({ customerUserId, serviceId, horizonDays = 14 }) => {
+      const qs = new URLSearchParams({
+        customerUserId: String(customerUserId || ""),
+        serviceId: String(serviceId || ""),
+        horizonDays: String(horizonDays || 14)
+      });
+      const res = await managerFetch(businessSlug, `/api/manager/bookings/available-upcoming-slots?${qs.toString()}`);
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Could not load upcoming appointments.", { tone: "error" });
+        return { ok: false, days: [] };
+      }
+      const j = await res.json().catch(() => ({}));
+      return { ok: true, days: j.days || [], startDate: j.startDate || null, horizonDays: j.horizonDays || horizonDays };
     },
     completeLesson: async (id, payload) => {
       const res = await managerFetch(businessSlug, `/api/manager/bookings/${id}/complete`, {
@@ -209,21 +308,21 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
-        notify(e.error || "Could not complete lesson.");
+        notify(e.error || "Could not complete lesson.", { tone: "error" });
         return false;
       }
       await loadAll();
-      notify("Lesson completed and report saved.");
+      notify("Lesson completed and report saved.", { tone: "success" });
       return true;
     },
     delete: async (id) => {
       const res = await managerFetch(businessSlug, `/api/manager/bookings/${id}`, { method: "DELETE" });
       if (!res.ok) {
-        notify("Delete failed.");
+        notify("Delete failed.", { tone: "error" });
         return;
       }
       await loadAll();
-      notify("Booking removed.");
+      notify("Booking removed.", { tone: "success" });
     },
     save: async (payload) => {
       if (payload.id) {
@@ -242,7 +341,7 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
         });
         if (!res.ok) {
           const e = await res.json().catch(() => ({}));
-          notify(e.error || "Save failed.");
+          notify(e.error || "Save failed.", { tone: "error" });
           return false;
         }
       } else {
@@ -262,12 +361,12 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
         });
         if (!res.ok) {
           const e = await res.json().catch(() => ({}));
-          notify(e.error || "Create failed.");
+          notify(e.error || "Create failed.", { tone: "error" });
           return false;
         }
       }
       await loadAll();
-      notify("Booking saved.");
+      notify("Booking saved.", { tone: "success" });
       return true;
     }
   };
@@ -279,8 +378,9 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
           fullName: payload.fullName,
           email: payload.email,
           phone: payload.phone,
-        status: payload.status,
-        internalNote: payload.internalNote
+          status: payload.status,
+          internalNote: payload.internalNote,
+          categoryId: payload.categoryId ?? null
         };
         const np = payload.newPassword != null ? String(payload.newPassword) : "";
         if (np.length >= 8) patch.newPassword = np;
@@ -303,7 +403,8 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
             email: payload.email,
             phone: payload.phone,
             password: payload.password,
-            status: payload.status || "active"
+            status: payload.status || "active",
+            categoryId: payload.categoryId ?? null
           })
         });
         if (!res.ok) {
@@ -393,6 +494,7 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
         duration: Number(payload.duration),
         price: payload.price === "" || payload.price == null ? null : Number(payload.price),
         description: payload.description || "",
+        categoryId: payload.categoryId ?? null,
         status: payload.status || "active"
       };
       const res = await managerFetch(businessSlug, url, {
@@ -468,11 +570,26 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
         body: JSON.stringify({ start_time: start, end_time: end })
       });
       if (!res.ok) {
-        notify("Update failed..");
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Update failed.");
         return;
       }
       await loadAll();
       notify("Window updated.");
+    },
+    setCategory: async (slotId, categoryId) => {
+      const res = await managerFetch(businessSlug, `/api/manager/availability/${slotId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoryId })
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Category update failed.");
+        return;
+      }
+      await loadAll();
+      notify("Rule category updated.");
     },
     removeSlot: async (dayLabel, slotId) => {
       const res = await managerFetch(businessSlug, `/api/manager/availability/${slotId}`, { method: "DELETE" });
@@ -483,11 +600,11 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       await loadAll();
       notify("Rule removed.");
     },
-    addRule: async (weekday, start_time, end_time) => {
+    addRule: async (weekday, start_time, end_time, categoryId) => {
       const res = await managerFetch(businessSlug, "/api/manager/availability", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ weekday, start_time, end_time, is_active: true })
+        body: JSON.stringify({ weekday, start_time, end_time, categoryId, is_active: true })
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
@@ -498,12 +615,12 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
       notify("Availability rule added.");
     },
     /** Contiguous windows from start–end; updates business slot length to match. */
-    generateSlots: async ({ weekday, start_time, end_time, slot_duration_minutes }) => {
+    generateSlots: async ({ weekday, start_time, end_time, slot_duration_minutes, categoryId }) => {
       try {
         const res = await managerFetch(businessSlug, "/api/manager/availability/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ weekday, start_time, end_time, slot_duration_minutes })
+          body: JSON.stringify({ weekday, start_time, end_time, slot_duration_minutes, categoryId })
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -535,6 +652,58 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
     }
   };
 
+  const categoryActions = {
+    save: async (payload) => {
+      const isEdit = Boolean(payload?.id);
+      const url = isEdit ? `/api/manager/categories/${payload.id}` : "/api/manager/categories";
+      const method = isEdit ? "PATCH" : "POST";
+      const res = await managerFetch(businessSlug, url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: payload.name,
+          description: payload.description || "",
+          status: payload.status
+        })
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Category save failed.");
+        return false;
+      }
+      await loadAll();
+      notify(isEdit ? "Category updated." : "Category created.");
+      return true;
+    },
+    toggleStatus: async (id) => {
+      const current = categories.find((c) => c.id === id);
+      if (!current) return;
+      const nextStatus = current.status === "active" ? "inactive" : "active";
+      const res = await managerFetch(businessSlug, `/api/manager/categories/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Category status update failed.");
+        return;
+      }
+      await loadAll();
+      notify(`Category ${nextStatus}.`);
+    },
+    delete: async (id) => {
+      const res = await managerFetch(businessSlug, `/api/manager/categories/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        notify(e.error || "Category delete failed.");
+        return;
+      }
+      await loadAll();
+      notify("Category archived.");
+    }
+  };
+
   const settingsActions = {
     save: async (payload) => {
       const res = await managerFetch(businessSlug, "/api/manager/business", {
@@ -558,9 +727,11 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
   const value = {
     business,
     userId,
+    platformAccess,
     bookings,
     customers,
     services,
+    categories,
     availability,
     availabilityRules: rules,
     settings,
@@ -569,6 +740,7 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
     bookingActions,
     customerActions,
     serviceActions,
+    categoryActions,
     availabilityActions,
     settingsActions,
     reload: loadAll
@@ -577,11 +749,7 @@ export function ManagerDataProvider({ children, initialBusiness, userId }) {
   return (
     <ManagerContext.Provider value={value}>
       {children}
-      {toast ? (
-        <div className="fixed bottom-4 right-4 z-50 rounded-md border bg-card px-4 py-3 text-sm shadow-card">
-          {toast}
-        </div>
-      ) : null}
+      <Toaster richColors position="bottom-right" />
     </ManagerContext.Provider>
   );
 }

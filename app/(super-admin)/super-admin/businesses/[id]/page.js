@@ -19,6 +19,7 @@ export default function BusinessDetailPage() {
   const [business, setBusiness] = useState(null);
   const [toast, setToast] = useState("");
   const [destroyOpen, setDestroyOpen] = useState(false);
+  const [canMutate, setCanMutate] = useState(false);
 
   const load = async () => {
     const res = await fetch(`/api/super-admin/businesses/${id}`);
@@ -33,6 +34,12 @@ export default function BusinessDetailPage() {
 
   useEffect(() => {
     load();
+    (async () => {
+      const res = await fetch("/api/super-admin/session");
+      if (!res.ok) return;
+      const s = await res.json().catch(() => ({}));
+      setCanMutate(Boolean(s.isPlatformOwner));
+    })();
   }, [id]);
 
   useEffect(() => {
@@ -42,6 +49,7 @@ export default function BusinessDetailPage() {
   }, [toast]);
 
   const savePatch = async (patch) => {
+    if (!canMutate) return;
     const res = await fetch(`/api/super-admin/businesses/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -62,16 +70,24 @@ export default function BusinessDetailPage() {
 
   return (
     <>
-      <Topbar title={business.name} subtitle={`${business.slug} · ${business.id}`} showSearch={false} />
+      <Topbar
+        title={business.name}
+        subtitle={`Business (tenant) · ${business.slug} · ${business.id}`}
+        showSearch={false}
+      />
       <main className="space-y-4 p-4 md:p-6">
         <div className="flex flex-wrap gap-2">
           <Link href="/super-admin/businesses" className="text-xs text-muted-foreground hover:text-foreground">
             ← All businesses
           </Link>
           <StatusBadge value={business.status} />
-          <button type="button" onClick={() => setDestroyOpen(true)} className="ml-auto text-xs text-danger hover:underline">
-            Delete business…
-          </button>
+          {canMutate ? (
+            <button type="button" onClick={() => setDestroyOpen(true)} className="ml-auto text-xs text-danger hover:underline">
+              Delete business…
+            </button>
+          ) : (
+            <span className="ml-auto text-xs text-muted-foreground">View-only (owner edits)</span>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2 border-b pb-2">
@@ -95,17 +111,20 @@ export default function BusinessDetailPage() {
         {tab === "Bookings" ? <BookingsTab bookings={business.bookings || []} /> : null}
         {tab === "Services" ? <ServicesTab services={business.services || []} /> : null}
         {tab === "Availability" ? <AvailabilityTab availability={business.availability || []} /> : null}
-        {tab === "Settings" ? <SettingsTab settings={business.settings} onSave={savePatch} /> : null}
+        {tab === "Settings" ? <SettingsTab settings={business.settings} onSave={savePatch} readOnly={!canMutate} /> : null}
         {tab === "Security" ? (
           <SecurityTab
             business={business}
             onSecurityChange={load}
             onToast={setToast}
+            readOnly={!canMutate}
           />
         ) : null}
       </main>
 
-      <DestroyModal open={destroyOpen} business={business} onClose={() => setDestroyOpen(false)} onDone={() => router.push("/super-admin/businesses")} />
+      {canMutate ? (
+        <DestroyModal open={destroyOpen} business={business} onClose={() => setDestroyOpen(false)} onDone={() => router.push("/super-admin/businesses")} />
+      ) : null}
 
       {toast ? (
         <div className="fixed bottom-4 right-4 z-50 rounded-md border bg-card px-4 py-3 text-sm shadow-card">{toast}</div>
@@ -114,7 +133,7 @@ export default function BusinessDetailPage() {
   );
 }
 
-function OverviewTab({ business, onSave }) {
+function OverviewTab({ business, onSave, readOnly }) {
   const [form, setForm] = useState({
     name: business.name,
     slug: business.slug,
@@ -139,6 +158,11 @@ function OverviewTab({ business, onSave }) {
         <CardTitle>Business overview</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {readOnly ? (
+          <p className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            View-only: only the platform owner can change tenant fields.
+          </p>
+        ) : null}
         <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">End customers</p>
           <p className="mt-1">
@@ -153,24 +177,26 @@ function OverviewTab({ business, onSave }) {
             Members: <span className="font-semibold text-foreground">{business.totalUsers ?? "—"}</span>
           </p>
         </div>
-        <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} />
-        <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-        <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+        <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={readOnly} />
+        <Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} disabled={readOnly} />
+        <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} disabled={readOnly} />
+        <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} disabled={readOnly} />
+        <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} disabled={readOnly}>
           <option value="active">active</option>
           <option value="inactive">inactive</option>
           <option value="suspended">suspended</option>
         </Select>
-        <button type="button" onClick={() => onSave(form)} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
-          Save overview
-        </button>
+        {!readOnly ? (
+          <button type="button" onClick={() => onSave(form)} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
+            Save overview
+          </button>
+        ) : null}
       </CardContent>
     </Card>
   );
 }
 
-function ManagerTab({ business, onSave }) {
+function ManagerTab({ business, onSave, readOnly }) {
   const [manager, setManager] = useState({ ...business.manager });
 
   useEffect(() => {
@@ -183,21 +209,27 @@ function ManagerTab({ business, onSave }) {
         <CardTitle>Manager account</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input value={manager.fullName} onChange={(e) => setManager({ ...manager, fullName: e.target.value })} />
-        <Input value={manager.email} onChange={(e) => setManager({ ...manager, email: e.target.value })} />
+        {readOnly ? (
+          <p className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">View-only.</p>
+        ) : null}
+        <Input value={manager.fullName} onChange={(e) => setManager({ ...manager, fullName: e.target.value })} disabled={readOnly} />
+        <Input value={manager.email} onChange={(e) => setManager({ ...manager, email: e.target.value })} disabled={readOnly} />
         <Input
           value={manager.username || ""}
           onChange={(e) => setManager({ ...manager, username: e.target.value || null })}
           placeholder="Username (optional)"
+          disabled={readOnly}
         />
-        <Select value={manager.status} onChange={(e) => setManager({ ...manager, status: e.target.value })}>
+        <Select value={manager.status} onChange={(e) => setManager({ ...manager, status: e.target.value })} disabled={readOnly}>
           <option value="active">active</option>
           <option value="inactive">inactive</option>
           <option value="suspended">suspended</option>
         </Select>
-        <button type="button" onClick={() => onSave({ manager })} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
-          Save manager
-        </button>
+        {!readOnly ? (
+          <button type="button" onClick={() => onSave({ manager })} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
+            Save manager
+          </button>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -329,7 +361,7 @@ function AvailabilityTab({ availability }) {
   );
 }
 
-function SettingsTab({ settings, onSave }) {
+function SettingsTab({ settings, onSave, readOnly }) {
   const [form, setForm] = useState(settings || {});
 
   useEffect(() => {
@@ -342,25 +374,41 @@ function SettingsTab({ settings, onSave }) {
         <CardTitle>Business settings</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <Input value={form.timezone || ""} onChange={(e) => setForm({ ...form, timezone: e.target.value })} placeholder="Timezone" />
+        {readOnly ? (
+          <p className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">View-only.</p>
+        ) : null}
+        <Input
+          value={form.timezone || ""}
+          onChange={(e) => setForm({ ...form, timezone: e.target.value })}
+          placeholder="Timezone"
+          disabled={readOnly}
+        />
         <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
           Auto-confirm
           <input
             type="checkbox"
             checked={Boolean(form.autoConfirm)}
             onChange={(e) => setForm({ ...form, autoConfirm: e.target.checked })}
+            disabled={readOnly}
           />
         </label>
-        <Input value={form.bookingPolicy || ""} onChange={(e) => setForm({ ...form, bookingPolicy: e.target.value })} placeholder="Booking policy" />
-        <button type="button" onClick={() => onSave({ settings: form })} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
-          Save settings
-        </button>
+        <Input
+          value={form.bookingPolicy || ""}
+          onChange={(e) => setForm({ ...form, bookingPolicy: e.target.value })}
+          placeholder="Booking policy"
+          disabled={readOnly}
+        />
+        {!readOnly ? (
+          <button type="button" onClick={() => onSave({ settings: form })} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
+            Save settings
+          </button>
+        ) : null}
       </CardContent>
     </Card>
   );
 }
 
-function SecurityTab({ business, onSecurityChange, onToast }) {
+function SecurityTab({ business, onSecurityChange, onToast, readOnly }) {
   const [initialPassword, setInitialPassword] = useState("");
   const [loginDisabled, setLoginDisabled] = useState(false);
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
@@ -371,6 +419,7 @@ function SecurityTab({ business, onSecurityChange, onToast }) {
   }, [business.manager]);
 
   const apply = async () => {
+    if (readOnly) return;
     const res = await fetch(`/api/super-admin/businesses/${business.id}/manager/security`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -395,24 +444,42 @@ function SecurityTab({ business, onSecurityChange, onToast }) {
         <CardTitle>Account security</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
+        {readOnly ? (
+          <p className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            View-only: platform owner manages manager security.
+          </p>
+        ) : null}
         <p className="text-muted-foreground">Never display existing passwords. Set a new initial password or toggle access flags only.</p>
         <label className="flex items-center justify-between rounded-md border px-3 py-2">
           Disable manager login
-          <input type="checkbox" checked={loginDisabled} onChange={(e) => setLoginDisabled(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={loginDisabled}
+            onChange={(e) => setLoginDisabled(e.target.checked)}
+            disabled={readOnly}
+          />
         </label>
         <label className="flex items-center justify-between rounded-md border px-3 py-2">
           Force password change on next login
-          <input type="checkbox" checked={forcePasswordChange} onChange={(e) => setForcePasswordChange(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={forcePasswordChange}
+            onChange={(e) => setForcePasswordChange(e.target.checked)}
+            disabled={readOnly}
+          />
         </label>
         <Input
           type="password"
           placeholder="New initial password (min 8 chars)"
           value={initialPassword}
           onChange={(e) => setInitialPassword(e.target.value)}
+          disabled={readOnly}
         />
-        <button type="button" onClick={apply} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
-          Apply security changes
-        </button>
+        {!readOnly ? (
+          <button type="button" onClick={apply} className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground">
+            Apply security changes
+          </button>
+        ) : null}
       </CardContent>
     </Card>
   );

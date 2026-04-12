@@ -1,12 +1,15 @@
 import { Badge } from "@/components/ui/badge";
+import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
 
 const tones = {
   confirmed: "success",
   pending: "warning",
-  cancelled: "danger",
+  rejected: "danger",
+  cancelled_by_user: "danger",
+  cancelled_by_manager: "danger",
   completed: "info",
   no_show: "danger",
-  rescheduled: "warning",
+  expired: "warning",
   "no-show": "danger",
   active: "success",
   inactive: "warning",
@@ -20,20 +23,28 @@ const tones = {
 const bookingLabels = {
   pending: "Pending",
   confirmed: "Confirmed",
+  rejected: "Rejected",
+  cancelled_by_user: "Cancelled by user",
+  cancelled_by_manager: "Cancelled by manager",
   completed: "Completed",
-  cancelled: "Cancelled",
   no_show: "No-show",
-  rescheduled: "Rescheduled"
+  expired: "Expired"
 };
 
 export function formatBookingStatus(value) {
-  const key = String(value);
+  const key = normalizeBookingStatus(value) || String(value);
   return bookingLabels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function StatusBadge({ value }) {
+  if (value === undefined || value === null || value === "") {
+    return <Badge tone="default">—</Badge>;
+  }
   const raw = String(value);
-  const normalized = raw.toLowerCase().replace(/\s+/g, "_");
+  if (raw === "undefined") {
+    return <Badge tone="default">—</Badge>;
+  }
+  const normalized = normalizeBookingStatus(raw) || raw.toLowerCase().replace(/\s+/g, "_");
   const toneKey = normalized === "no-show" ? "no_show" : normalized;
   const display =
     bookingLabels[raw] || bookingLabels[toneKey] || raw;

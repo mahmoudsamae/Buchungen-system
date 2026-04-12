@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 
 export async function PATCH(request, { params }) {
   const g = await guardManagerJson(request);
@@ -53,6 +54,47 @@ export async function PATCH(request, { params }) {
     const { error } = await supabase
       .from("business_users")
       .update({ status: body.status })
+      .eq("business_id", business.id)
+      .eq("user_id", userId)
+      .eq("role", "customer");
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  if (body.categoryId !== undefined || body.category_id !== undefined) {
+    const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
+    if (categoryId !== null) {
+      const { category, error: cErr } = await findCategoryForBusiness(supabase, business.id, categoryId);
+      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+      if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+    }
+    const { error } = await supabase
+      .from("business_users")
+      .update({ category_id: categoryId })
+      .eq("business_id", business.id)
+      .eq("user_id", userId)
+      .eq("role", "customer");
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  if (body.primaryInstructorUserId !== undefined || body.primary_instructor_user_id !== undefined) {
+    const instructorIdRaw = body.primaryInstructorUserId ?? body.primary_instructor_user_id;
+    const instructorId = instructorIdRaw == null || String(instructorIdRaw).trim() === "" ? null : String(instructorIdRaw).trim();
+    if (instructorId) {
+      const { data: insMembership } = await supabase
+        .from("business_users")
+        .select("user_id, role, status")
+        .eq("business_id", business.id)
+        .eq("user_id", instructorId)
+        .in("role", ["manager", "staff"])
+        .eq("status", "active")
+        .maybeSingle();
+      if (!insMembership) {
+        return NextResponse.json({ error: "Selected instructor is not an active team member." }, { status: 400 });
+      }
+    }
+    const { error } = await supabase
+      .from("business_users")
+      .update({ primary_instructor_user_id: instructorId })
       .eq("business_id", business.id)
       .eq("user_id", userId)
       .eq("role", "customer");

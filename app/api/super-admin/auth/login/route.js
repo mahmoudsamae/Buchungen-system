@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { claimFirstPlatformOwnerIfNeeded } from "@/lib/platform/bootstrap-platform-owner";
+import { platformAccessFromProfile } from "@/lib/platform/access";
 
 export async function POST(request) {
   let body;
@@ -24,14 +26,16 @@ export async function POST(request) {
 
   const { data: profile, error: pe } = await supabase
     .from("profiles")
-    .select("is_platform_super_admin")
+    .select("platform_role, is_platform_super_admin, platform_staff_suspended")
     .eq("id", data.user.id)
     .maybeSingle();
 
-  if (pe || !profile?.is_platform_super_admin) {
+  if (pe || !platformAccessFromProfile(profile).canAccessPlatformAdmin) {
     await supabase.auth.signOut();
-    return NextResponse.json({ error: "Not a platform super admin." }, { status: 403 });
+    return NextResponse.json({ error: "Not authorized for platform administration." }, { status: 403 });
   }
+
+  await claimFirstPlatformOwnerIfNeeded(data.user.id);
 
   return NextResponse.json({ ok: true });
 }

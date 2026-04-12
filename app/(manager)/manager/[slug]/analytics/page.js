@@ -6,6 +6,7 @@ import { useLanguage } from "@/components/i18n/language-provider";
 import { ChartPreview } from "@/components/manager/chart-preview";
 import { useManager } from "@/components/manager/provider";
 import { StatsCard } from "@/components/shared/stats-card";
+import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
 import {
   bookingsInClosedDateRange,
   countByWeekdayMonSun,
@@ -23,12 +24,15 @@ export default function AnalyticsPage() {
   );
 
   const weeklyCount = weekBookings.length;
-  const pending = weekBookings.filter((b) => b.status === "pending").length;
-  const completed = weekBookings.filter((b) => b.status === "completed").length;
-  const cancelled = weekBookings.filter((b) => b.status === "cancelled").length;
-  const confirmed = weekBookings.filter((b) => b.status === "confirmed").length;
-  const noShow = weekBookings.filter((b) => b.status === "no_show").length;
-  const rescheduledMark = weekBookings.filter((b) => b.status === "rescheduled").length;
+  const pending = weekBookings.filter((b) => normalizeBookingStatus(b.status) === "pending").length;
+  const completed = weekBookings.filter((b) => normalizeBookingStatus(b.status) === "completed").length;
+  const cancelled = weekBookings.filter((b) =>
+    ["cancelled_by_user", "cancelled_by_manager"].includes(normalizeBookingStatus(b.status))
+  ).length;
+  const confirmed = weekBookings.filter((b) => normalizeBookingStatus(b.status) === "confirmed").length;
+  const noShow = weekBookings.filter((b) => normalizeBookingStatus(b.status) === "no_show").length;
+  const rejected = weekBookings.filter((b) => normalizeBookingStatus(b.status) === "rejected").length;
+  const expired = weekBookings.filter((b) => normalizeBookingStatus(b.status) === "expired").length;
 
   const completionRate =
     weeklyCount === 0 ? "0%" : `${Math.round((completed / weeklyCount) * 100)}%`;
@@ -98,8 +102,9 @@ export default function AnalyticsPage() {
               { label: "Confirmed", value: confirmed },
               { label: "Completed", value: completed },
               { label: "Cancelled", value: cancelled },
+              { label: "Rejected", value: rejected },
               { label: "No-show", value: noShow },
-              { label: "Rescheduled", value: rescheduledMark }
+              { label: "Expired", value: expired }
             ]}
           />
         </section>

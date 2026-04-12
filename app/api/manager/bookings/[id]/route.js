@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
+import { bookingBlockConflictMessage, isBookingBlockConflict } from "@/lib/booking/booking-conflict";
+import { canTransitionBookingStatus, expirePastPendingBookings } from "@/lib/booking/booking-lifecycle";
 import { isBookingStatus } from "@/lib/manager/booking-constants";
 import { assertNoBookingBufferViolation } from "@/lib/booking/booking-buffer";
 import { assertNoBookingOverlap } from "@/lib/manager/booking-overlap";
@@ -37,17 +39,34 @@ export async function PATCH(request, { params }) {
   if (loadErr) return NextResponse.json({ error: loadErr.message }, { status: 400 });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  await expirePastPendingBookings(supabase, { businessId: business.id, timeZone: business.timezone });
+  const { data: freshExisting } = await supabase
+    .from("bookings")
+    .select("*")
+    .eq("id", id)
+    .eq("business_id", business.id)
+    .maybeSingle();
+  const current = freshExisting || existing;
+
   const nextDateInput = body.booking_date || body.date;
   const nextTimeInput = body.start_time || body.time;
   const hasScheduleIntent = nextDateInput !== undefined || nextTimeInput !== undefined;
+  const hasStatusOnlyIntent =
+    body.status !== undefined &&
+    nextDateInput === undefined &&
+    nextTimeInput === undefined &&
+    body.serviceId === undefined &&
+    body.service_id === undefined &&
+    body.customerUserId === undefined &&
+    body.customer_user_id === undefined;
 
-  let nd = existing.booking_date;
-  let nst = normStart(existing.start_time);
+  let nd = current.booking_date;
+  let nst = normStart(current.start_time);
   if (nextDateInput !== undefined) nd = sliceDate(nextDateInput);
   if (nextTimeInput !== undefined) nst = String(nextTimeInput).slice(0, 5);
 
   const scheduleChanged =
-    sliceDate(nd) !== sliceDate(existing.booking_date) || nst !== normStart(existing.start_time);
+    sliceDate(nd) !== sliceDate(current.booking_date) || nst !== normStart(current.start_time);
 
   if (hasScheduleIntent && scheduleChanged) {
     const extraPatch = {};
@@ -99,14 +118,14 @@ export async function PATCH(request, { params }) {
       supabase,
       business,
       actorUserId: user.id,
-      existingRow: existing,
+      existingRow: current,
       newBookingDate: nd,
       newStartHHMM: nst,
       extraPatch
     });
 
     if (!result.ok) {
-      return NextResponse.json({ error: result.message }, { status: result.status });
+      return NextResponse.json({ error: result.message, code: result.code || null }, { status: result.status });
     }
 
     return NextResponse.json({ ok: true, booking: result.booking });
@@ -119,6 +138,14 @@ export async function PATCH(request, { params }) {
     if (!isBookingStatus(st)) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }
+    const tx = canTransitionBookingStatus({
+      currentStatus: String(current.status),
+      nextStatus: String(st),
+      booking: current,
+      businessTimeZone: business.timezone || "UTC"
+    });
+    if (!tx.ok) return NextResponse.json({ error: tx.message }, { status: 409 });
+
     patch.status = st;
   }
   if (body.notes !== undefined) patch.notes = body.notes;
@@ -197,7 +224,7 @@ export async function PATCH(request, { params }) {
 
     const dateForOverlap = patch.booking_date
       ? sliceDate(patch.booking_date)
-      : sliceDate(existing.booking_date);
+      : sliceDate(current.booking_date);
     const overlap = await assertNoBookingOverlap(supabase, {
       businessId: business.id,
       bookingDate: dateForOverlap,
@@ -234,7 +261,22 @@ export async function PATCH(request, { params }) {
     .select()
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    if (isBookingBlockConflict(error)) {
+      if (hasStatusOnlyIntent) {
+        return NextResponse.json(
+          {
+            code: "STATUS_REACTIVATION_CONFLICT",
+            error:
+              "This booking cannot be restored to confirmed.\nWhy: another active booking already occupies this exact slot.\nNext step: use reschedule to choose a free time."
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json({ error: bookingBlockConflictMessage() }, { status: 409 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 400 });
+  }
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   return NextResponse.json({ ok: true, booking: row });

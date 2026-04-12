@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 
 function toUi(row) {
   return {
@@ -8,6 +9,7 @@ function toUi(row) {
     duration: Number(row.duration_minutes),
     price: row.price == null ? null : Number(row.price),
     description: row.description || "",
+    categoryId: row.category_id || null,
     status: row.is_active ? "active" : "inactive",
     is_active: Boolean(row.is_active),
     created_at: row.created_at
@@ -21,7 +23,7 @@ export async function GET(request) {
 
   const { data, error } = await supabase
     .from("services")
-    .select("id, name, duration_minutes, price, description, is_active, created_at")
+    .select("id, name, duration_minutes, price, description, category_id, is_active, created_at")
     .eq("business_id", business.id)
     .order("created_at", { ascending: true });
 
@@ -49,6 +51,7 @@ export async function POST(request) {
   const price =
     body.price === "" || body.price == null ? null : Number(body.price);
   const description = String(body.description || "").trim();
+  const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
   const is_active = body.status ? body.status === "active" : body.is_active !== false;
 
   if (!name) return NextResponse.json({ error: "Service name is required." }, { status: 400 });
@@ -57,6 +60,18 @@ export async function POST(request) {
   }
   if (price != null && (!Number.isFinite(price) || price < 0)) {
     return NextResponse.json({ error: "Price must be a positive number." }, { status: 400 });
+  }
+  if (categoryId == null) {
+    return NextResponse.json(
+      { error: "Each service must belong to a category. Please select a category." },
+      { status: 400 }
+    );
+  }
+
+  if (categoryId !== undefined && categoryId !== null) {
+    const { category, error: cErr } = await findCategoryForBusiness(supabase, business.id, categoryId);
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+    if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
   }
 
   const { data, error } = await supabase
@@ -67,9 +82,10 @@ export async function POST(request) {
       duration_minutes: duration,
       price,
       description: description || null,
+      category_id: categoryId === undefined ? null : categoryId,
       is_active
     })
-    .select("id, name, duration_minutes, price, description, is_active, created_at")
+    .select("id, name, duration_minutes, price, description, category_id, is_active, created_at")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });

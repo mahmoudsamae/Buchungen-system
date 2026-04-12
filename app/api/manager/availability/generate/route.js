@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
 import { generateContiguousSlotWindows } from "@/lib/booking/slots";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 
 function normalizeTime(t) {
   const s = String(t || "").trim();
@@ -39,6 +40,13 @@ export async function POST(request) {
   }
 
   const slot_duration_minutes = Number(body.slot_duration_minutes);
+  const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
+  if (categoryId !== undefined && categoryId !== null) {
+    const { category, error: cErr } = await findCategoryForBusiness(supabase, business.id, categoryId);
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+    if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+  }
+
   if (!Number.isFinite(slot_duration_minutes) || slot_duration_minutes < 5 || slot_duration_minutes > 480) {
     return NextResponse.json({ error: "slot_duration_minutes must be between 5 and 480." }, { status: 400 });
   }
@@ -57,7 +65,8 @@ export async function POST(request) {
     weekday,
     start_time: `${w.start}:00`,
     end_time: `${w.end}:00`,
-    is_active: true
+    is_active: true,
+    category_id: categoryId === undefined ? null : categoryId
   }));
 
   /** Insert first so a failed business update does not block persisting rules. */

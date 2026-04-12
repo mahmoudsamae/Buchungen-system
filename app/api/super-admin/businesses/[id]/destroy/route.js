@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { guardSuperAdminJson } from "@/lib/auth/guards";
+import { guardPlatformOwnerJson } from "@/lib/auth/guards";
 import { deleteBusinessAdmin, getBusinessDetailAdmin } from "@/lib/data/super-admin-businesses";
 
 export async function POST(request, { params }) {
-  const g = await guardSuperAdminJson();
+  const g = await guardPlatformOwnerJson();
   if (g.response) return g.response;
 
   const secret = process.env.SUPER_ADMIN_SECRET;

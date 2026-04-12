@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { guardSuperAdminJson } from "@/lib/auth/guards";
+import { guardPlatformOwnerJson, guardSuperAdminJson } from "@/lib/auth/guards";
 import { getBusinessDetailAdmin, updateBusinessAdmin } from "@/lib/data/super-admin-businesses";
 
 export async function GET(request, { params }) {
@@ -17,7 +17,7 @@ export async function GET(request, { params }) {
 }
 
 export async function PATCH(request, { params }) {
-  const g = await guardSuperAdminJson();
+  const g = await guardPlatformOwnerJson();
   if (g.response) return g.response;
   const { id } = await params;
 

@@ -36,9 +36,11 @@ export function SuperAdminLoginForm() {
 
   return (
     <Card className="relative w-full max-w-md rounded-2xl border bg-card/90 p-6 shadow-card backdrop-blur">
-      <h1 className="text-xl font-semibold">Super Admin</h1>
+      <h1 className="text-xl font-semibold">Platform administration</h1>
       <p className="mt-2 text-sm text-muted-foreground">
-        Sign in with a Supabase user flagged as platform super admin (<code className="text-xs">profiles.is_platform_super_admin</code>).
+        For platform owner or platform admin accounts. Roles are stored in{" "}
+        <code className="text-xs">profiles.platform_role</code>; the legacy flag{" "}
+        <code className="text-xs">is_platform_super_admin</code> is still accepted.
       </p>
       <form onSubmit={submit} className="mt-6 space-y-3">
         <label className="block text-xs text-muted-foreground">

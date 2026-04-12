@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { validateCustomerCancellation } from "@/lib/booking/cancellation-rules";
+import { validateTeacherCustomerCancellationPolicy } from "@/lib/booking/teacher-booking-policy";
 import { createClient } from "@/lib/supabase/server";
 
-/** Customer: cancel own booking (status → cancelled). */
+/** Customer: cancel own booking (status → cancelled_by_user). */
 export async function PATCH(request, { params }) {
   const supabase = await createClient();
   const {
@@ -29,7 +30,7 @@ export async function PATCH(request, { params }) {
 
   const { data: mem } = await supabase
     .from("business_users")
-    .select("id")
+    .select("id, primary_instructor_user_id")
     .eq("business_id", biz.id)
     .eq("user_id", user.id)
     .eq("role", "customer")
@@ -53,9 +54,18 @@ export async function PATCH(request, { params }) {
     return NextResponse.json({ error: v.message }, { status: 400 });
   }
 
+  const tp = await validateTeacherCustomerCancellationPolicy(supabase, {
+    business: biz,
+    bookingRow: row,
+    primaryInstructorUserId: mem.primary_instructor_user_id || null
+  });
+  if (!tp.ok) {
+    return NextResponse.json({ error: tp.message }, { status: 400 });
+  }
+
   const { data: updated, error: ue } = await supabase
     .from("bookings")
-    .update({ status: "cancelled" })
+    .update({ status: "cancelled_by_user" })
     .eq("id", id)
     .eq("business_id", biz.id)
     .eq("customer_user_id", user.id)

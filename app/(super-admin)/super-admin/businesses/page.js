@@ -9,15 +9,20 @@ import { Select } from "@/components/ui/select";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { ManagerDialog } from "@/components/manager/dialog";
 import { BusinessCreateModal } from "@/components/super-admin/business-create-modal";
+import { SchoolAccessModal } from "@/components/super-admin/school-access-modal";
+import { useLanguage } from "@/components/i18n/language-provider";
 
 export default function SuperAdminBusinessesPage() {
+  const { t } = useLanguage();
   const [rows, setRows] = useState([]);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [detail, setDetail] = useState(null);
   const [destroyTarget, setDestroyTarget] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [accessTarget, setAccessTarget] = useState(null);
   const [toast, setToast] = useState("");
+  const [canMutate, setCanMutate] = useState(false);
 
   const load = async () => {
     const res = await fetch("/api/super-admin/businesses");
@@ -28,6 +33,12 @@ export default function SuperAdminBusinessesPage() {
 
   useEffect(() => {
     load();
+    (async () => {
+      const res = await fetch("/api/super-admin/session");
+      if (!res.ok) return;
+      const s = await res.json().catch(() => ({}));
+      setCanMutate(Boolean(s.isPlatformOwner));
+    })();
   }, []);
 
   useEffect(() => {
@@ -50,6 +61,7 @@ export default function SuperAdminBusinessesPage() {
   }, [rows, query, status]);
 
   const patchBusiness = async (id, body) => {
+    if (!canMutate) return;
     const res = await fetch(`/api/super-admin/businesses/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -65,24 +77,37 @@ export default function SuperAdminBusinessesPage() {
 
   return (
     <>
-      <Topbar title="Businesses" subtitle="All tenants" showSearch={false} />
+      <Topbar
+        title="Businesses"
+        subtitle="Each row is a tenant; the manager account runs the business dashboard (not platform staff)."
+        showSearch={false}
+      />
       <main className="space-y-4 p-4 md:p-6">
+        {!canMutate ? (
+          <p className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            View-only: platform owner can add businesses and run status or security changes.
+          </p>
+        ) : null}
         <Card>
           <CardContent className="grid gap-3 p-4 md:grid-cols-3">
-            <Input placeholder="Search name, slug, manager email…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Input placeholder="Search business name, slug, manager email…" value={query} onChange={(e) => setQuery(e.target.value)} />
             <Select value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="all">All statuses</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
               <option value="suspended">Suspended</option>
             </Select>
-            <button
-              type="button"
-              onClick={() => setCreateOpen(true)}
-              className="inline-flex h-10 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground shadow-soft transition hover:opacity-95"
-            >
-              Add business
-            </button>
+            {canMutate ? (
+              <button
+                type="button"
+                onClick={() => setCreateOpen(true)}
+                className="inline-flex h-10 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground shadow-soft transition hover:opacity-95"
+              >
+                Add business
+              </button>
+            ) : (
+              <span className="flex h-10 items-center text-xs text-muted-foreground">Owner: add business</span>
+            )}
           </CardContent>
         </Card>
 
@@ -96,7 +121,7 @@ export default function SuperAdminBusinessesPage() {
                       "Business",
                       "Slug",
                       "Manager",
-                      "Manager email",
+                      "Admin email",
                       "Phone",
                       "Status",
                       "Created",
@@ -136,30 +161,41 @@ export default function SuperAdminBusinessesPage() {
                             <Link href={`/super-admin/businesses/${b.id}`} className="rounded border px-2 py-1 text-xs hover:bg-muted">
                               View
                             </Link>
-                            <button type="button" onClick={() => setDetail(b)} className="rounded border px-2 py-1 text-xs hover:bg-muted">
-                              Quick edit
-                            </button>
                             <button
                               type="button"
-                              onClick={() => patchBusiness(b.id, { status: "suspended" })}
-                              className="rounded border px-2 py-1 text-xs hover:bg-muted"
+                              onClick={() => setAccessTarget(b)}
+                              className="rounded border border-primary/40 bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/15"
                             >
-                              Suspend
+                              {t("superAdmin.businesses.access")}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => patchBusiness(b.id, { status: "active" })}
-                              className="rounded border px-2 py-1 text-xs hover:bg-muted"
-                            >
-                              Activate
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setDestroyTarget(b)}
-                              className="rounded border px-2 py-1 text-xs text-danger hover:bg-danger/10"
-                            >
-                              Delete
-                            </button>
+                            {canMutate ? (
+                              <>
+                                <button type="button" onClick={() => setDetail(b)} className="rounded border px-2 py-1 text-xs hover:bg-muted">
+                                  Quick edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => patchBusiness(b.id, { status: "suspended" })}
+                                  className="rounded border px-2 py-1 text-xs hover:bg-muted"
+                                >
+                                  Suspend
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => patchBusiness(b.id, { status: "active" })}
+                                  className="rounded border px-2 py-1 text-xs hover:bg-muted"
+                                >
+                                  Activate
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDestroyTarget(b)}
+                                  className="rounded border px-2 py-1 text-xs text-danger hover:bg-danger/10"
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -195,13 +231,23 @@ export default function SuperAdminBusinessesPage() {
         }}
       />
 
-      <BusinessCreateModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onCreated={() => {
-          setToast("Business and manager created successfully.");
-          load();
-        }}
+      {canMutate ? (
+        <BusinessCreateModal
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          variant="business"
+          onCreated={() => {
+            setToast("Business and manager account created.");
+            load();
+          }}
+        />
+      ) : null}
+
+      <SchoolAccessModal
+        open={Boolean(accessTarget)}
+        business={accessTarget}
+        onClose={() => setAccessTarget(null)}
+        canMutate={canMutate}
       />
 
       {toast ? (
@@ -282,7 +328,7 @@ function DestroyBusinessDialog({ open, business, onClose, onDone }) {
             Type <span className="font-mono">DELETE</span>, the exact business name, and your Super Admin secret. This cannot be undone.
           </p>
           <Input placeholder="Type DELETE" value={phrase} onChange={(e) => setPhrase(e.target.value)} />
-          <Input placeholder={`Exact name: ${business.name}`} value={name} onChange={(e) => setName(e.target.value)} />
+          <Input placeholder={`Exact business name: ${business.name}`} value={name} onChange={(e) => setName(e.target.value)} />
           <Input type="password" placeholder="SUPER_ADMIN_SECRET" value={secret} onChange={(e) => setSecret(e.target.value)} />
           {error ? <p className="text-xs text-danger">{error}</p> : null}
           <div className="flex justify-end gap-2">
