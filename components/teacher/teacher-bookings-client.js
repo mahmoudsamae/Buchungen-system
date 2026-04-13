@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Ban, CalendarClock, Check, CheckCircle2, Plus, RotateCcw, X } from "lucide-react";
+import { Ban, CalendarClock, Check, CheckCircle2, Plus, RotateCcw, UserX, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -62,6 +62,9 @@ const rejectBtn =
 const restoreBtn =
   `${actionBase} border-sky-500/35 bg-sky-950/30 text-sky-100 hover:border-sky-400/45 hover:bg-sky-900/40 focus-visible:ring-sky-500/50`;
 
+const noShowBtn =
+  `${actionBase} border-orange-500/35 bg-orange-950/30 text-orange-100 hover:border-orange-400/50 hover:bg-orange-900/40 focus-visible:ring-orange-500/50`;
+
 export function TeacherBookingsClient({ schoolSlug, businessTimeZone = "UTC" }) {
   const { t } = useLanguage();
   const [bookings, setBookings] = useState([]);
@@ -86,6 +89,9 @@ export function TeacherBookingsClient({ schoolSlug, businessTimeZone = "UTC" }) 
   const [resReason, setResReason] = useState("");
   const [resModalError, setResModalError] = useState("");
   const [cancelTarget, setCancelTarget] = useState(null);
+  const [noShowTarget, setNoShowTarget] = useState(null);
+  const [noShowBusy, setNoShowBusy] = useState(false);
+  const [noShowModalError, setNoShowModalError] = useState("");
   const [allowTeachersToRestoreCancelledBookings, setAllowTeachersToRestoreCancelledBookings] = useState(false);
   const [canTeacherRestoreCancelledBookings, setCanTeacherRestoreCancelledBookings] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState(null);
@@ -338,20 +344,35 @@ export function TeacherBookingsClient({ schoolSlug, businessTimeZone = "UTC" }) 
                           </>
                         ) : null}
                         {b.status === "confirmed" ? (
-                          <button
-                            type="button"
-                            className={completeBtn}
-                            disabled={!hasBookingEnded(bookingForEndCheck(b), businessTimeZone)}
-                            title={
-                              hasBookingEnded(bookingForEndCheck(b), businessTimeZone)
-                                ? undefined
-                                : "Available after the lesson end time (school timezone)."
-                            }
-                            onClick={() => setCompleteBooking(b)}
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                            {t("teacher.bookings.complete")}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className={completeBtn}
+                              disabled={!hasBookingEnded(bookingForEndCheck(b), businessTimeZone)}
+                              title={
+                                hasBookingEnded(bookingForEndCheck(b), businessTimeZone)
+                                  ? undefined
+                                  : "Available after the lesson end time (school timezone)."
+                              }
+                              onClick={() => setCompleteBooking(b)}
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                              {t("teacher.bookings.complete")}
+                            </button>
+                            {hasBookingStarted(bookingForLifecycleUi(b), businessTimeZone) ? (
+                              <button
+                                type="button"
+                                className={noShowBtn}
+                                onClick={() => {
+                                  setNoShowModalError("");
+                                  setNoShowTarget(b);
+                                }}
+                              >
+                                <UserX className="h-3.5 w-3.5 shrink-0 opacity-95" aria-hidden />
+                                No-show
+                              </button>
+                            ) : null}
+                          </>
                         ) : null}
                         {canTeacherRestoreCancelledBookings &&
                         (b.status === "cancelled_by_manager" || b.status === "cancelled_by_user") &&
@@ -464,6 +485,76 @@ export function TeacherBookingsClient({ schoolSlug, businessTimeZone = "UTC" }) 
                 }}
               >
                 Confirm cancellation
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </ManagerDialog>
+
+      <ManagerDialog
+        open={Boolean(noShowTarget)}
+        onClose={() => {
+          if (noShowBusy) return;
+          setNoShowTarget(null);
+          setNoShowModalError("");
+        }}
+        title="No-show"
+      >
+        {noShowTarget ? (
+          <div className="space-y-4 text-sm">
+            <p className="text-muted-foreground">
+              Mark this lesson as no-show? Use this only when the student did not attend the scheduled lesson.
+            </p>
+            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Student:</span> {noShowTarget.customer}
+              </p>
+              <p className="mt-1">
+                <span className="font-medium text-foreground">Lesson:</span> {noShowTarget.date} · {noShowTarget.time}
+                {noShowTarget.endTime ? `–${noShowTarget.endTime}` : ""}
+              </p>
+            </div>
+            {noShowModalError ? (
+              <p className="rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-xs text-amber-100" role="alert">
+                {noShowModalError}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                disabled={noShowBusy}
+                onClick={() => {
+                  setNoShowTarget(null);
+                  setNoShowModalError("");
+                }}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                className="rounded-xl"
+                disabled={noShowBusy}
+                onClick={async () => {
+                  setNoShowModalError("");
+                  setNoShowBusy(true);
+                  const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/${noShowTarget.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: "no_show" })
+                  });
+                  const j = await res.json().catch(() => ({}));
+                  setNoShowBusy(false);
+                  if (res.ok) {
+                    setNoShowTarget(null);
+                    await load();
+                  } else {
+                    setNoShowModalError(typeof j.error === "string" ? j.error : "Could not mark as no-show.");
+                  }
+                }}
+              >
+                {noShowBusy ? t("common.loading") : "Confirm no-show"}
               </Button>
             </div>
           </div>

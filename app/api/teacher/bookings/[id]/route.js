@@ -96,6 +96,10 @@ export async function PATCH(request, { params }) {
       const cCap = await assertTeacherCapability(business.id, user.id, "can_cancel_booking");
       if (!cCap.ok) return NextResponse.json({ error: cCap.message }, { status: cCap.status });
     }
+    if (st === "no_show") {
+      const nsCap = await assertTeacherCapability(business.id, user.id, "can_complete_booking");
+      if (!nsCap.ok) return NextResponse.json({ error: nsCap.message }, { status: nsCap.status });
+    }
     if (!isBookingStatus(st)) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }
