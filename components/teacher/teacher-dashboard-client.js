@@ -62,21 +62,20 @@ export function TeacherDashboardClient({ schoolName, schoolSlug, userEmail }) {
     if (!summary) return [];
     return WEEKDAY_SHORT.map((label, w) => {
       const slots = summary[w];
-      if (!slots?.length) return { w, label, text: "—" };
+      if (!slots?.length) return { w, label, slots: [], sharedValidity: null };
+      const validityKeys = slots
+        .map((s) => `${s.validFrom || ""}|${s.validUntil || ""}`)
+        .filter((x) => x !== "|");
+      const uniqueValidity = [...new Set(validityKeys)];
+      const sharedValidity = uniqueValidity.length === 1 ? uniqueValidity[0] : null;
       return {
         w,
         label,
-        text: slots
-          .map((s) => {
-            let line = `${s.start}–${s.end}`;
-            if (s.validFrom || s.validUntil) {
-              const vf = s.validFrom || "…";
-              const vu = s.validUntil || "…";
-              line += ` (${vf}→${vu})`;
-            }
-            return line;
-          })
-          .join(", ")
+        slots: slots.map((s) => ({
+          time: `${s.start}–${s.end}`,
+          validity: s.validFrom || s.validUntil ? `${s.validFrom || "…"} - ${s.validUntil || "…"}` : null
+        })),
+        sharedValidity
       };
     });
   }, [summary]);
@@ -219,11 +218,35 @@ export function TeacherDashboardClient({ schoolName, schoolSlug, userEmail }) {
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">{t("teacher.dashboard.availabilitySummary")}</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1.5 text-sm">
+          <CardContent className="space-y-2 text-sm">
             {summaryLines.map((line) => (
-              <div key={line.w} className="flex gap-3 rounded-lg px-2 py-1.5 hover:bg-muted/20">
-                <span className="w-10 shrink-0 font-medium text-muted-foreground">{line.label}</span>
-                <span className="text-foreground/90">{line.text}</span>
+              <div key={line.w} className="rounded-xl border border-border/35 bg-background/25 px-3 py-2.5">
+                <div className="flex items-start gap-3">
+                  <span className="w-10 shrink-0 pt-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {line.label}
+                  </span>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    {line.slots.length ? (
+                      <>
+                        <div className="flex flex-wrap gap-1.5">
+                          {line.slots.map((slot, idx) => (
+                            <span
+                              key={`${line.w}-${idx}-${slot.time}`}
+                              className="inline-flex rounded-md border border-border/60 bg-muted/25 px-2 py-1 text-xs font-medium text-foreground/90"
+                            >
+                              {slot.time}
+                            </span>
+                          ))}
+                        </div>
+                        {line.sharedValidity ? (
+                          <p className="text-[11px] text-muted-foreground">Valid: {line.sharedValidity}</p>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Keine Verfugbarkeit</p>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </CardContent>

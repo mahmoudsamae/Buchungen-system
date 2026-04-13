@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { assertBookingAllowed } from "@/lib/booking/assert-booking-allowed";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   BOOKING_CONFLICT_CODES,
   bookingBlockConflictMessage,
@@ -8,9 +9,9 @@ import {
 } from "@/lib/booking/booking-conflict";
 import { expirePastPendingBookings } from "@/lib/booking/booking-lifecycle";
 import { guardStaffJson } from "@/lib/auth/guards";
+import { assertTeacherCapability, loadTeacherEffectivePermissions } from "@/lib/auth/teacher-capabilities";
 import { isBookingStatus, normalizeBookingStatus } from "@/lib/manager/booking-constants";
 import { normalizeBookingDate } from "@/lib/manager/booking-date-utils";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 function toUi(b, names, servicesById) {
   const bookingDate = b.booking_date != null ? b.booking_date : b.date;
@@ -34,6 +35,8 @@ export async function GET(request) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
+  const permissions = await loadTeacherEffectivePermissions(business.id, user.id);
+  const canTeacherRestoreCancelledBookings = permissions.can_restore_cancelled_booking !== false;
 
   await expirePastPendingBookings(supabase, { businessId: business.id, timeZone: business.timezone });
 
@@ -61,7 +64,11 @@ export async function GET(request) {
 
   const studentIds = (roster || []).map((r) => r.user_id);
   if (!studentIds.length) {
-    return NextResponse.json({ bookings: [] });
+    return NextResponse.json({
+      bookings: [],
+      allowTeachersToRestoreCancelledBookings: Boolean(business.allow_teachers_to_restore_cancelled_bookings),
+      canTeacherRestoreCancelledBookings
+    });
   }
 
   let q = dataDb
@@ -95,7 +102,9 @@ export async function GET(request) {
   const servicesById = Object.fromEntries((services || []).map((s) => [s.id, s]));
 
   return NextResponse.json({
-    bookings: (rows || []).map((b) => toUi(b, names, servicesById))
+    bookings: (rows || []).map((b) => toUi(b, names, servicesById)),
+    allowTeachersToRestoreCancelledBookings: Boolean(business.allow_teachers_to_restore_cancelled_bookings),
+    canTeacherRestoreCancelledBookings
   });
 }
 
@@ -103,6 +112,9 @@ export async function POST(request) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
+
+  const cap = await assertTeacherCapability(business.id, user.id, "can_create_manual_booking");
+  if (!cap.ok) return NextResponse.json({ error: cap.message }, { status: cap.status });
 
   let body;
   try {
@@ -122,21 +134,41 @@ export async function POST(request) {
     return NextResponse.json({ error: "customerUserId, booking_date, and start_time required." }, { status: 400 });
   }
 
-  const { data: mem, error: mErr } = await supabase
+  /**
+   * Same assignment rule as teacher students list / roster (`primary_instructor_user_id` = this teacher).
+   * Must use service role: staff JWT + RLS often cannot SELECT other customers' `business_users` rows,
+   * which falsely made `mem` null and rejected valid students shown in the booking UI.
+   */
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch {
+    return NextResponse.json({ error: "Server configuration error." }, { status: 500 });
+  }
+
+  const { data: mem, error: mErr } = await admin
     .from("business_users")
-    .select("category_id, primary_instructor_user_id")
+    .select("category_id, primary_instructor_user_id, status")
     .eq("business_id", business.id)
     .eq("user_id", customerUserId)
     .eq("role", "customer")
     .maybeSingle();
 
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 400 });
-  if (!mem || mem.primary_instructor_user_id !== user.id) {
+  if (!mem || String(mem.primary_instructor_user_id || "") !== String(user.id)) {
     return NextResponse.json({ error: "You can only book lessons for your assigned students." }, { status: 403 });
   }
 
+  /** Manual booking without service uses slot end_time from the picker; duration must match an available window. */
+  if (!serviceId && !end_time) {
+    return NextResponse.json(
+      { error: "end_time is required when creating a booking without a service (use the selected slot end)." },
+      { status: 400 }
+    );
+  }
+
   if (serviceId) {
-    const { data: svc } = await supabase
+    const { data: svc } = await admin
       .from("services")
       .select("id, duration_minutes, business_id, is_active")
       .eq("id", serviceId)
@@ -146,24 +178,27 @@ export async function POST(request) {
     if (!svc.is_active) return NextResponse.json({ error: "Service is inactive." }, { status: 400 });
   }
 
-  const allowed = await assertBookingAllowed(supabase, {
+  /** Service-role client for validation + insert so RLS cannot hide rows or block writes after server-side checks. */
+  const allowed = await assertBookingAllowed(admin, {
     business,
     customerUserId,
     bookingDateYmd,
     startHHMM: start_time,
     endHHMM: end_time || undefined,
     excludeBookingId: undefined,
-    serviceIdOrNull: serviceId,
+    serviceIdOrNull: serviceId || null,
     categoryIdOrNull: mem?.category_id || null,
     actingUser: null,
-    skipEmailVerification: true
+    skipEmailVerification: true,
+    customerBusinessUserRow: mem,
+    skipInstructorBookingWindowDays: true
   });
   if (!allowed.ok) {
     return NextResponse.json({ error: allowed.message, code: allowed.code || null }, { status: allowed.status });
   }
   const end = allowed.endHHMM;
 
-  const existingBlock = await findExistingActiveBookingForBlock(supabase, {
+  const existingBlock = await findExistingActiveBookingForBlock(admin, {
     businessId: business.id,
     bookingDateYmd,
     startHHMM: start_time,
@@ -194,13 +229,13 @@ export async function POST(request) {
       ? String(internalRaw).trim()
       : null;
 
-  const { data: row, error } = await supabase
+  const { data: row, error } = await admin
     .from("bookings")
     .insert({
       business_id: business.id,
       customer_user_id: customerUserId,
       created_by_user_id: user.id,
-      service_id: serviceId,
+      service_id: serviceId || null,
       booking_date: bookingDateYmd,
       start_time: `${start_time}:00`,
       end_time: `${end}:00`,
@@ -222,10 +257,10 @@ export async function POST(request) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  const { data: p } = await supabase.from("profiles").select("full_name").eq("id", customerUserId).maybeSingle();
+  const { data: p } = await admin.from("profiles").select("full_name").eq("id", customerUserId).maybeSingle();
   const servicesById = {};
   if (row?.service_id) {
-    const { data: svc } = await supabase.from("services").select("id, name").eq("id", row.service_id).maybeSingle();
+    const { data: svc } = await admin.from("services").select("id, name").eq("id", row.service_id).maybeSingle();
     if (svc) servicesById[svc.id] = svc;
   }
   return NextResponse.json({ booking: toUi(row, { [customerUserId]: p?.full_name }, servicesById) });

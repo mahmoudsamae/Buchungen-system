@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
+import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertTeacherOwnsStudent } from "@/lib/data/teacher-workspace";
 import { expirePastPendingBookings, canTransitionBookingStatus } from "@/lib/booking/booking-lifecycle";
-import { isBookingStatus } from "@/lib/manager/booking-constants";
+import { isBookingStatus, normalizeBookingStatus } from "@/lib/manager/booking-constants";
 import { runReschedule } from "@/lib/manager/booking-reschedule";
+import { normalizeBookingDate } from "@/lib/manager/booking-date-utils";
 
 function sliceDate(d) {
-  return String(d).slice(0, 10);
+  const n = normalizeBookingDate(d);
+  return n || String(d).slice(0, 10);
 }
 
 function normStart(t) {
@@ -50,14 +53,27 @@ export async function PATCH(request, { params }) {
   const nextTimeInput = body.start_time || body.time;
   const hasScheduleIntent = nextDateInput !== undefined || nextTimeInput !== undefined;
 
-  let nd = row.booking_date;
+  let nd = sliceDate(row.booking_date);
   let nst = normStart(row.start_time);
   if (nextDateInput !== undefined) nd = sliceDate(nextDateInput);
   if (nextTimeInput !== undefined) nst = String(nextTimeInput).slice(0, 5);
 
-  const scheduleChanged = sliceDate(nd) !== sliceDate(row.booking_date) || nst !== normStart(row.start_time);
+  const scheduleChanged = nd !== sliceDate(row.booking_date) || nst !== normStart(row.start_time);
 
   if (hasScheduleIntent && scheduleChanged) {
+    const rCap = await assertTeacherCapability(business.id, user.id, "can_reschedule_booking");
+    if (!rCap.ok) return NextResponse.json({ error: rCap.message }, { status: rCap.status });
+    const rowSt = normalizeBookingStatus(row.status) || String(row.status || "");
+    if (!["pending", "confirmed"].includes(rowSt)) {
+      return NextResponse.json({ error: "This booking cannot be rescheduled." }, { status: 400 });
+    }
+    const reasonRaw = body.reschedule_reason ?? body.rescheduleReason;
+    const reason = typeof reasonRaw === "string" ? reasonRaw.trim() : "";
+    let extraPatch = {};
+    if (reason) {
+      const prev = String(row.internal_note || "").trim();
+      extraPatch.internal_note = prev ? `${prev}\n\n[Reschedule] ${reason}` : `[Reschedule] ${reason}`;
+    }
     const result = await runReschedule({
       supabase: admin,
       business,
@@ -65,7 +81,7 @@ export async function PATCH(request, { params }) {
       existingRow: row,
       newBookingDate: nd,
       newStartHHMM: nst,
-      extraPatch: {}
+      extraPatch
     });
     if (!result.ok) {
       return NextResponse.json({ error: result.message, code: result.code || null }, { status: result.status });
@@ -76,6 +92,10 @@ export async function PATCH(request, { params }) {
   const patch = {};
   if (body.status !== undefined) {
     const st = typeof body.status === "string" ? body.status.trim() : body.status;
+    if (st === "cancelled_by_manager" || st === "cancelled_by_user") {
+      const cCap = await assertTeacherCapability(business.id, user.id, "can_cancel_booking");
+      if (!cCap.ok) return NextResponse.json({ error: cCap.message }, { status: cCap.status });
+    }
     if (!isBookingStatus(st)) {
       return NextResponse.json({ error: "Invalid status." }, { status: 400 });
     }

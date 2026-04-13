@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { guardManagerJson } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { TEACHER_ROLE_PRESETS } from "@/lib/manager/teacher-permissions";
+import { replaceTeacherServiceAssignments } from "@/lib/manager/teacher-service-assignments";
+import {
+  mergeTeacherSettingsRow,
+  coerceTeacherSettingsPatch,
+  teacherSettingsToUpsertRow,
+  teacherSettingsDefaultsFromBusiness
+} from "@/lib/teacher/teacher-settings-defaults";
 
 function mapMember(row) {
   const p = row.profiles;
@@ -128,6 +136,57 @@ export async function POST(request) {
   if (buErr) {
     await admin.auth.admin.deleteUser(userId);
     return NextResponse.json({ error: buErr.message }, { status: 400 });
+  }
+
+  const titleRaw = body.title !== undefined && body.title !== null ? String(body.title).trim() : undefined;
+  const rolePresetIn = body.rolePreset ?? body.role_preset;
+  const permOver = body.permissionOverrides ?? body.permission_overrides;
+
+  if (titleRaw !== undefined || rolePresetIn !== undefined || permOver !== undefined) {
+    const rp =
+      rolePresetIn != null && TEACHER_ROLE_PRESETS[String(rolePresetIn)] ? String(rolePresetIn) : "standard";
+    const extRow = {
+      business_id: business.id,
+      teacher_user_id: userId,
+      title: titleRaw === undefined ? null : titleRaw || null,
+      role_preset: rp,
+      permission_overrides: permOver != null && typeof permOver === "object" ? permOver : {}
+    };
+    const { error: extErr } = await admin.from("teacher_staff_extensions").upsert(extRow, {
+      onConflict: "business_id,teacher_user_id"
+    });
+    if (extErr) {
+      console.error("[team POST] teacher_staff_extensions", extErr.message);
+    }
+  }
+
+  if (body.bookingPolicy && typeof body.bookingPolicy === "object") {
+    const currentMerged = mergeTeacherSettingsRow(null, teacherSettingsDefaultsFromBusiness(business));
+    const partial = coerceTeacherSettingsPatch(body.bookingPolicy, currentMerged);
+    const nextMerged = mergeTeacherSettingsRow({ ...currentMerged, ...partial });
+    const upsert = teacherSettingsToUpsertRow(business.id, userId, nextMerged);
+    const { error: tsErr } = await admin.from("teacher_settings").upsert(upsert, {
+      onConflict: "business_id,teacher_user_id"
+    });
+    if (!tsErr) {
+      const mode = nextMerged.instant_booking_enabled ? "direct" : "approval_required";
+      await admin
+        .from("business_users")
+        .update({ student_booking_mode: mode })
+        .eq("business_id", business.id)
+        .eq("user_id", userId)
+        .eq("role", "staff");
+    } else {
+      console.error("[team POST] teacher_settings", tsErr.message);
+    }
+  }
+
+  if (Array.isArray(body.serviceIds)) {
+    try {
+      await replaceTeacherServiceAssignments(admin, business.id, userId, body.serviceIds);
+    } catch (e) {
+      console.error("[team POST] teacher_services", e.message);
+    }
   }
 
   const { data: prof } = await admin.from("profiles").select("full_name, email, phone").eq("id", userId).maybeSingle();

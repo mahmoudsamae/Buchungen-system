@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
+import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertTeacherOwnsStudent } from "@/lib/data/teacher-workspace";
-import { hasBookingStarted } from "@/lib/booking/booking-lifecycle";
+import { hasBookingEnded } from "@/lib/booking/booking-lifecycle";
+import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
 
 function parseTopics(input) {
   const raw = String(input || "");
@@ -13,8 +15,11 @@ function parseTopics(input) {
 export async function POST(request, { params }) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
-  const { business, user, supabase } = g.ctx;
+  const { business, user } = g.ctx;
   const { id } = await params;
+
+  const cap = await assertTeacherCapability(business.id, user.id, "can_complete_booking");
+  if (!cap.ok) return NextResponse.json({ error: cap.message }, { status: cap.status });
 
   let body;
   try {
@@ -48,12 +53,20 @@ export async function POST(request, { params }) {
   const own = await assertTeacherOwnsStudent(admin, business.id, user.id, booking.customer_user_id);
   if (!own) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  if (booking.status !== "confirmed") {
-    return NextResponse.json({ error: "Only confirmed bookings can be completed." }, { status: 400 });
-  }
-  if (!hasBookingStarted(booking, business.timezone || "UTC")) {
+  const st = normalizeBookingStatus(booking.status) || String(booking.status || "");
+  if (st !== "confirmed") {
     return NextResponse.json(
-      { error: "This lesson cannot be marked completed before its start time." },
+      { error: "Only confirmed bookings can be completed, and not if already finished or cancelled." },
+      { status: 400 }
+    );
+  }
+  const tz = business.timezone || "UTC";
+  if (!hasBookingEnded(booking, tz)) {
+    return NextResponse.json(
+      {
+        error:
+          "This lesson can only be marked completed after the scheduled end time has passed in the school timezone."
+      },
       { status: 400 }
     );
   }
@@ -69,7 +82,7 @@ export async function POST(request, { params }) {
     completed_at: completedAt
   };
 
-  const { data: report, error: reportErr } = await supabase
+  const { data: report, error: reportErr } = await admin
     .from("lesson_reports")
     .upsert(payload, { onConflict: "booking_id" })
     .select("*")
@@ -77,15 +90,26 @@ export async function POST(request, { params }) {
 
   if (reportErr) return NextResponse.json({ error: reportErr.message }, { status: 400 });
 
+  const notesPatch = visibleToStudent
+    ? { notes, internal_note: booking.internal_note ?? null }
+    : { notes: booking.notes ?? null, internal_note: notes };
+
   const { data: updated, error: updateErr } = await admin
     .from("bookings")
-    .update({ status: "completed", notes: visibleToStudent ? notes : null })
+    .update({ status: "completed", ...notesPatch })
     .eq("id", booking.id)
     .eq("business_id", business.id)
+    .eq("status", "confirmed")
     .select("*")
     .single();
 
   if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 400 });
+  if (!updated) {
+    return NextResponse.json(
+      { error: "This booking could not be completed (it may have just been updated by someone else)." },
+      { status: 409 }
+    );
+  }
 
   return NextResponse.json({ ok: true, booking: updated, report });
 }

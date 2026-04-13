@@ -6,7 +6,9 @@ export function ManagerDialog({ open, title, children, onClose, wide }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/45 p-4">
-      <Card className={`w-full rounded-xl p-5 shadow-card ${wide ? "max-w-2xl" : "max-w-lg"}`}>
+      <Card
+        className={`max-h-[min(90vh,920px)] w-full overflow-y-auto rounded-xl p-5 shadow-card ${wide ? "max-w-2xl" : "max-w-lg"}`}
+      >
         <div className="mb-4 flex items-start justify-between gap-3">
           <h3 className="text-lg font-semibold">{title}</h3>
           <button onClick={onClose} className="rounded-md border px-2 py-1 text-xs hover:bg-muted">

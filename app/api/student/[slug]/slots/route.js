@@ -44,7 +44,8 @@ export async function GET(request, { params }) {
   }
 
   const { settings: teacherSettings } = await fetchTeacherSettingsMerged(supabase, biz.id, primaryInstructorUserId, {
-    readTeacherRowWithServiceRole: true
+    readTeacherRowWithServiceRole: true,
+    businessRow: biz
   });
   const studentWindow = resolveStudentPortalBookingWindow(biz, teacherSettings);
 

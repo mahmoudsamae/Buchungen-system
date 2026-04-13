@@ -63,7 +63,7 @@ export async function POST(request, { params }) {
   const primaryInstructorUserId = mem.primary_instructor_user_id || null;
   const instantBooking =
     primaryInstructorUserId != null
-      ? await getPortalInstantBookingPreference(supabase, biz.id, primaryInstructorUserId)
+      ? await getPortalInstantBookingPreference(supabase, biz.id, primaryInstructorUserId, { businessRow: biz })
       : true;
 
   const actingUser = {

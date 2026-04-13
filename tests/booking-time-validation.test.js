@@ -10,12 +10,16 @@ vi.mock("@/lib/manager/booking-reschedule", async () => {
   };
 });
 
-vi.mock("@/lib/booking/booking-availability-resolve", () => ({
+const { resolveBookingAvailabilityWindows } = vi.hoisted(() => ({
   resolveBookingAvailabilityWindows: vi.fn(async () => ({
     mode: "open",
     windows: [{ start_time: "08:00", end_time: "09:00" }],
     source: "test"
   }))
+}));
+
+vi.mock("@/lib/booking/booking-availability-resolve", () => ({
+  resolveBookingAvailabilityWindows
 }));
 
 function mockSupabaseWithCustomer() {
@@ -58,6 +62,11 @@ const business = {
 afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
+  resolveBookingAvailabilityWindows.mockImplementation(async () => ({
+    mode: "open",
+    windows: [{ start_time: "08:00", end_time: "09:00" }],
+    source: "test"
+  }));
 });
 
 describe("booking wall-clock validation", () => {
@@ -124,6 +133,33 @@ describe("booking wall-clock validation", () => {
 
     expect(result.ok).toBe(true);
     expect(result.endHHMM).toBe("09:00");
+  });
+
+  it("allows a shorter lesson inside a larger availability window (matches slot picker)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-09T20:00:00.000Z"));
+
+    resolveBookingAvailabilityWindows.mockResolvedValue({
+      mode: "open",
+      windows: [{ start_time: "09:00", end_time: "12:00" }],
+      source: "test"
+    });
+
+    const result = await assertBookingAllowed(mockSupabaseWithCustomer(), {
+      business,
+      customerUserId: "u1",
+      bookingDateYmd: "2026-04-10",
+      startHHMM: "09:00",
+      endHHMM: "09:30",
+      excludeBookingId: "booking-to-exclude",
+      serviceIdOrNull: null,
+      categoryIdOrNull: null,
+      actingUser: null,
+      skipEmailVerification: true
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.endHHMM).toBe("09:30");
   });
 
   it("rejects reschedule to a past slot", async () => {

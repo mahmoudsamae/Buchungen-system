@@ -21,6 +21,10 @@ export function TeacherSettingsClient({ schoolSlug }) {
   const [loading, setLoading] = useState(true);
   const [policySaving, setPolicySaving] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [hasPersistedPolicyRow, setHasPersistedPolicyRow] = useState(false);
+  const [canManageBookingPreferences, setCanManageBookingPreferences] = useState(true);
+  const [canManageOwnSettings, setCanManageOwnSettings] = useState(true);
+  const [isPolicyEditing, setIsPolicyEditing] = useState(false);
   const [error, setError] = useState("");
   const [policyMessage, setPolicyMessage] = useState("");
 
@@ -28,6 +32,7 @@ export function TeacherSettingsClient({ schoolSlug }) {
     setLoading(true);
     setError("");
     setPolicyMessage("");
+    setIsPolicyEditing(false);
     const [pRes, sRes] = await Promise.all([
       teacherFetch(schoolSlug, "/api/teacher/profile"),
       teacherFetch(schoolSlug, "/api/teacher/settings")
@@ -46,6 +51,9 @@ export function TeacherSettingsClient({ schoolSlug }) {
     }
     if (sRes.ok && sJson.settings) {
       setPolicy({ ...TEACHER_SETTINGS_DEFAULTS, ...sJson.settings });
+      setHasPersistedPolicyRow(Boolean(sJson.hasPersistedRow));
+      setCanManageBookingPreferences(sJson.canManageBookingPreferences !== false);
+      setCanManageOwnSettings(sJson.canManageOwnSettings !== false);
     } else if (!sRes.ok && sRes.status !== 404) {
       setError((e) => e || sJson.error || "Could not load booking policies.");
     }
@@ -72,7 +80,9 @@ export function TeacherSettingsClient({ schoolSlug }) {
       return;
     }
     if (json.settings) setPolicy({ ...TEACHER_SETTINGS_DEFAULTS, ...json.settings });
+    setHasPersistedPolicyRow(Boolean(json.hasPersistedRow));
     setPolicyMessage("Policies saved.");
+    setIsPolicyEditing(false);
   };
 
   const resetPolicy = async () => {
@@ -91,7 +101,9 @@ export function TeacherSettingsClient({ schoolSlug }) {
       return;
     }
     if (json.settings) setPolicy({ ...TEACHER_SETTINGS_DEFAULTS, ...json.settings });
-    setPolicyMessage("Policies reset to defaults.");
+    setHasPersistedPolicyRow(Boolean(json.hasPersistedRow));
+    setPolicyMessage("Now using school defaults.");
+    setIsPolicyEditing(false);
   };
 
   const saveProfile = async (e) => {
@@ -177,26 +189,49 @@ export function TeacherSettingsClient({ schoolSlug }) {
         {policyMessage ? (
           <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">{policyMessage}</p>
         ) : null}
+        <p className="text-xs text-muted-foreground">
+          {hasPersistedPolicyRow ? "Mode: custom override for your account." : "Mode: inherited from school defaults."}
+        </p>
+        {!canManageBookingPreferences ? (
+          <p className="text-xs text-muted-foreground">Your school has disabled editing booking preferences for your account.</p>
+        ) : null}
+        {!canManageOwnSettings ? (
+          <p className="text-xs text-muted-foreground">Your school has disabled managing your own settings for your account.</p>
+        ) : null}
+        {canManageOwnSettings && canManageBookingPreferences && !isPolicyEditing ? (
+          <div className="flex justify-end border-t border-border/50 pt-4">
+            <Button type="button" variant="outline" className="rounded-xl" onClick={() => setIsPolicyEditing(true)} disabled={loading}>
+              Edit settings
+            </Button>
+          </div>
+        ) : null}
         <TeacherPolicySettingsForm
           policy={policy}
           setPolicy={setPolicy}
-          disabled={loading || policySaving}
+          disabled={loading || policySaving || !canManageOwnSettings || !canManageBookingPreferences || !isPolicyEditing}
           tab={policyTab}
         />
-        <div className="flex flex-wrap gap-3 border-t border-border/50 pt-4">
-          <Button type="button" className="rounded-xl" onClick={savePolicy} disabled={loading || policySaving}>
-            {policySaving ? "Saving…" : "Save policy changes"}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className="rounded-xl"
-            onClick={resetPolicy}
-            disabled={loading || policySaving}
-          >
-            Reset to defaults
-          </Button>
-        </div>
+        {canManageOwnSettings && canManageBookingPreferences && isPolicyEditing ? (
+          <div className="flex flex-wrap gap-3 border-t border-border/50 pt-4">
+            <Button
+              type="button"
+              className="rounded-xl"
+              onClick={savePolicy}
+              disabled={loading || policySaving || !canManageOwnSettings || !canManageBookingPreferences}
+            >
+              {policySaving ? "Saving…" : "Save policy changes"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              onClick={resetPolicy}
+              disabled={loading || policySaving || !canManageOwnSettings || !canManageBookingPreferences}
+            >
+              Use school defaults
+            </Button>
+          </div>
+        ) : null}
       </PolicySectionCard>
 
       <p className="max-w-2xl text-sm text-muted-foreground">{t("teacher.settings.passwordHint")}</p>

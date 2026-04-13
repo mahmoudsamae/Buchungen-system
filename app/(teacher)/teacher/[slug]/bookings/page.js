@@ -7,5 +7,5 @@ export default async function TeacherBookingsPage({ params }) {
   const { slug } = await params;
   const ctx = await requireStaffContext({ slug });
   if (!ctx) return null;
-  return <TeacherBookingsClient schoolSlug={ctx.business.slug} />;
+  return <TeacherBookingsClient schoolSlug={ctx.business.slug} businessTimeZone={ctx.business.timezone || "UTC"} />;
 }

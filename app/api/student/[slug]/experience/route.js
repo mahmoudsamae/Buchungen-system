@@ -29,7 +29,7 @@ export async function GET(request, { params }) {
 
   const pid = mem.primary_instructor_user_id || null;
   const { settings: teacherSettings } = pid
-    ? await fetchTeacherSettingsMerged(supabase, biz.id, pid, { readTeacherRowWithServiceRole: true })
+    ? await fetchTeacherSettingsMerged(supabase, biz.id, pid, { readTeacherRowWithServiceRole: true, businessRow: biz })
     : { settings: mergeTeacherSettingsRow(null) };
 
   const bookingWindow = resolveStudentPortalBookingWindow(biz, teacherSettings);

@@ -63,7 +63,7 @@ export async function PATCH(request) {
       .eq("role", "staff");
     if (buErr) return NextResponse.json({ error: buErr.message }, { status: 400 });
 
-    const { settings: merged } = await fetchTeacherSettingsMerged(supabase, business.id, user.id);
+    const { settings: merged } = await fetchTeacherSettingsMerged(supabase, business.id, user.id, { businessRow: business });
     const withInstant = {
       ...merged,
       instant_booking_enabled: body.studentBookingMode === "direct"

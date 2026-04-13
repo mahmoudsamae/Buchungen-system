@@ -40,9 +40,9 @@ export async function POST(request, { params }) {
   const own = await assertTeacherOwnsStudent(admin, business.id, user.id, row.customer_user_id);
   if (!own) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-  const { data: mem } = await supabase
+  const { data: mem } = await admin
     .from("business_users")
-    .select("category_id")
+    .select("category_id, primary_instructor_user_id, status")
     .eq("business_id", business.id)
     .eq("user_id", row.customer_user_id)
     .eq("role", "customer")
@@ -62,7 +62,8 @@ export async function POST(request, { params }) {
     serviceIdOrNull: row.service_id || null,
     categoryIdOrNull: mem?.category_id || null,
     actingUser: null,
-    skipEmailVerification: true
+    skipEmailVerification: true,
+    customerBusinessUserRow: mem || undefined
   });
 
   if (!allowed.ok) {

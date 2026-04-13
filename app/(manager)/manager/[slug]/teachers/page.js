@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { KeyRound, Mail, UserRound, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/navigation/page-header";
 import { useManager } from "@/components/manager/provider";
@@ -13,6 +14,19 @@ import { Select } from "@/components/ui/select";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TeacherAccessModal } from "@/components/manager/teacher-access-modal";
 import { ConfirmDialog } from "@/components/manager/dialog";
+import { TeacherCreateModal } from "@/components/manager/teacher-create-modal";
+import { Button } from "@/components/ui/button";
+
+const listActionBase =
+  "inline-flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-45";
+const profileBtn =
+  `${listActionBase} border-primary/35 bg-primary/10 text-primary hover:border-primary/55 hover:bg-primary/15 focus-visible:ring-primary/50`;
+const accessBtn =
+  `${listActionBase} border-violet-500/35 bg-violet-950/30 text-violet-100 hover:border-violet-400/50 hover:bg-violet-900/45 focus-visible:ring-violet-500/45`;
+const recoveryBtn =
+  `${listActionBase} border-border/70 bg-zinc-900/55 text-zinc-100 hover:border-border hover:bg-zinc-800/80 focus-visible:ring-zinc-400/40`;
+const deactivateBtn =
+  `${listActionBase} border-danger/45 bg-danger/15 text-danger hover:border-danger/60 hover:bg-danger/20 focus-visible:ring-danger/50`;
 
 export default function TeachersPage() {
   const { business } = useManager();
@@ -21,8 +35,7 @@ export default function TeachersPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ fullName: "", email: "", phone: "", password: "" });
+  const [createOpen, setCreateOpen] = useState(false);
   const [accessTeacher, setAccessTeacher] = useState(null);
   const [deactivateTarget, setDeactivateTarget] = useState(null);
   const [insights, setInsights] = useState(null);
@@ -66,7 +79,6 @@ export default function TeachersPage() {
             : serverMsg
           : t("manager.teachers.loadError")
       );
-      /** Do not clear rows on failure — keeps last good list (e.g. after a successful create if refetch fails). */
       setLoading(false);
       return;
     }
@@ -120,33 +132,9 @@ export default function TeachersPage() {
     await load();
   }
 
-  async function onSubmit(e) {
-    e.preventDefault();
-    setSaving(true);
-    const payload = {
-      fullName: form.fullName.trim(),
-      email: form.email.trim().toLowerCase(),
-      phone: form.phone.trim() || undefined,
-      password: form.password
-    };
-    const res = await managerFetch(slug, "/api/manager/team", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    setSaving(false);
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      toast.error(body.error || t("manager.teachers.addError"));
-      return;
-    }
-    toast.success(t("manager.teachers.addSuccess"));
-    setForm({ fullName: "", email: "", phone: "", password: "" });
-    setError(null);
-    /** Same source of truth as GET; show immediately even before refetch. */
-    if (body.user?.id) {
+  function onTeacherCreated(u) {
+    if (u?.id) {
       setRows((prev) => {
-        const u = body.user;
         const rest = prev.filter((r) => r.id !== u.id);
         const next = [...rest, u];
         next.sort((a, b) => {
@@ -157,83 +145,20 @@ export default function TeachersPage() {
         return next;
       });
     }
-    await load();
   }
 
   return (
     <>
-      <PageHeader businessName={business?.name} subtitle={t("manager.pages.teachers.subtitle")} />
+      <PageHeader
+        businessName={business?.name}
+        subtitle={t("manager.pages.teachers.subtitle")}
+        actions={
+          <Button type="button" className="rounded-xl" onClick={() => setCreateOpen(true)}>
+            {t("manager.teachers.createTeacher")}
+          </Button>
+        }
+      />
       <main className="space-y-6 p-4 pb-10 md:p-6 md:pb-12">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("manager.teachers.addTitle")}</CardTitle>
-            <p className="text-xs text-muted-foreground">{t("manager.teachers.addHint")}</p>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={onSubmit} className="grid gap-3 md:grid-cols-2">
-              <div className="md:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="teacher-fullName">
-                  {t("manager.teachers.field.fullName")}
-                </label>
-                <Input
-                  id="teacher-fullName"
-                  value={form.fullName}
-                  onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))}
-                  required
-                  autoComplete="name"
-                />
-              </div>
-              <div className="md:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="teacher-email">
-                  {t("manager.teachers.field.email")}
-                </label>
-                <Input
-                  id="teacher-email"
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                  required
-                  autoComplete="email"
-                />
-              </div>
-              <div className="md:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="teacher-phone">
-                  {t("manager.teachers.field.phone")}
-                </label>
-                <Input
-                  id="teacher-phone"
-                  value={form.phone}
-                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
-                  autoComplete="tel"
-                />
-              </div>
-              <div className="md:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-muted-foreground" htmlFor="teacher-password">
-                  {t("manager.teachers.field.password")}
-                </label>
-                <Input
-                  id="teacher-password"
-                  type="password"
-                  value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  minLength={8}
-                  required
-                  autoComplete="new-password"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-                >
-                  {saving ? t("common.loading") : t("manager.teachers.submit")}
-                </button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
         <Card className="rounded-2xl border-border/60 shadow-soft">
           <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -261,7 +186,12 @@ export default function TeachersPage() {
             ) : error ? (
               <p className="text-sm text-destructive">{error}</p>
             ) : staffRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{t("manager.teachers.empty")}</p>
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">{t("manager.teachers.empty")}</p>
+                <Button type="button" variant="secondary" className="rounded-xl" onClick={() => setCreateOpen(true)}>
+                  {t("manager.teachers.createTeacher")}
+                </Button>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[880px] text-sm">
@@ -301,33 +231,37 @@ export default function TeachersPage() {
                             {d?.cancellationRatePct != null ? `${d.cancellationRatePct}%` : "—"}
                           </td>
                           <td className="py-3 text-right">
-                            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1">
+                            <div className="flex flex-wrap items-center justify-end gap-1.5">
                               <Link
                                 href={`/manager/${slug}/teachers/${u.id}`}
-                                className="text-sm font-semibold text-primary hover:underline"
+                                className={profileBtn}
                               >
+                                <UserRound className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
                                 {t("manager.teachers.viewProfile")}
                               </Link>
                               <button
                                 type="button"
                                 onClick={() => setAccessTeacher(u)}
-                                className="text-sm font-medium text-violet-300 hover:underline"
+                                className={accessBtn}
                               >
+                                <KeyRound className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
                                 {t("manager.teachers.access")}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => resetTeacherPassword(u.id)}
-                                className="text-sm font-medium text-muted-foreground hover:text-foreground hover:underline"
+                                className={recoveryBtn}
                               >
+                                <Mail className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
                                 {t("access.sendRecovery")}
                               </button>
                               <button
                                 type="button"
                                 disabled={u.status !== "active"}
                                 onClick={() => setDeactivateTarget(u)}
-                                className="text-sm font-medium text-danger/90 hover:underline disabled:opacity-40"
+                                className={deactivateBtn}
                               >
+                                <UserX className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
                                 {t("manager.teachers.deactivate")}
                               </button>
                             </div>
@@ -347,6 +281,17 @@ export default function TeachersPage() {
           </CardContent>
         </Card>
       </main>
+
+      <TeacherCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        slug={slug}
+        onCreated={(u) => {
+          onTeacherCreated(u);
+          setError(null);
+          load();
+        }}
+      />
 
       <TeacherAccessModal
         open={Boolean(accessTeacher)}

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
 import { PageHeader } from "@/components/navigation/page-header";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -8,7 +9,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useManager } from "@/components/manager/provider";
 import { ConfirmDialog, ManagerDialog } from "@/components/manager/dialog";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   DropdownMenu,
@@ -18,14 +18,37 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { ChevronDown } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { CategoryCombobox } from "@/components/manager/category-combobox";
+import { buildDefaultNewServiceForm } from "@/lib/manager/default-new-service-form";
 
 export default function CategoriesPage() {
   const { categories, services, categoryActions, serviceActions, business } = useManager();
   const { t } = useLanguage();
+  const businessSlug = business?.slug ?? "";
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [serviceEditing, setServiceEditing] = useState(null);
   const [serviceDeleting, setServiceDeleting] = useState(null);
+  const [serviceSubmitAttempted, setServiceSubmitAttempted] = useState(false);
+
+  const categoriesForServiceModal = useMemo(() => {
+    const list = categories || [];
+    const editingId = serviceEditing?.categoryId;
+    return list.filter(
+      (c) => (c.is_active !== false && c.status !== "inactive") || (editingId && c.id === editingId)
+    );
+  }, [categories, serviceEditing?.categoryId]);
+
+  const serviceFormValid = useMemo(() => {
+    if (!serviceEditing) return false;
+    const nameOk = String(serviceEditing.name || "").trim().length > 0;
+    const d = Number(serviceEditing.duration);
+    const durationOk = Number.isInteger(d) && d >= 5 && d <= 480;
+    const categoryOk = Boolean(String(serviceEditing.categoryId || "").trim());
+    const hasCategories = (categories || []).length > 0;
+    return nameOk && durationOk && categoryOk && hasCategories;
+  }, [serviceEditing, categories]);
 
   const servicesByCategory = categories.map((category) => ({
     ...category,
@@ -101,7 +124,14 @@ export default function CategoriesPage() {
                                 <ChevronDown className="h-3.5 w-3.5 opacity-70" />
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-48">
-                                <DropdownMenuItem onSelect={() => setServiceEditing(service)}>Edit service</DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() => {
+                                    setServiceSubmitAttempted(false);
+                                    setServiceEditing(service);
+                                  }}
+                                >
+                                  Edit service
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onSelect={() => serviceActions.toggleStatus(service.id)}>
                                   {service.status === "active" ? "Disable" : "Enable"}
                                 </DropdownMenuItem>
@@ -150,7 +180,10 @@ export default function CategoriesPage() {
                         <button
                           type="button"
                           className="rounded-md border px-2.5 py-1 text-xs hover:bg-muted"
-                          onClick={() => setServiceEditing(service)}
+                          onClick={() => {
+                            setServiceSubmitAttempted(false);
+                            setServiceEditing(service);
+                          }}
                         >
                           Assign category
                         </button>
@@ -208,67 +241,100 @@ export default function CategoriesPage() {
 
       <ManagerDialog
         open={Boolean(serviceEditing)}
-        onClose={() => setServiceEditing(null)}
-        title={serviceEditing?.id ? "Edit Service" : "Add Service"}
+        onClose={() => {
+          setServiceSubmitAttempted(false);
+          setServiceEditing(null);
+        }}
+        title={serviceEditing?.id ? t("manager.pages.services.editServiceTitle") : t("manager.pages.services.addServiceTitle")}
       >
         {serviceEditing ? (
           <form
             className="space-y-3"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!serviceEditing.categoryId) return;
+              setServiceSubmitAttempted(true);
+              if (!serviceFormValid) return;
               serviceActions.save({
                 ...serviceEditing,
                 duration: Number(serviceEditing.duration),
                 price: serviceEditing.price === "" ? null : Number(serviceEditing.price)
               });
+              setServiceSubmitAttempted(false);
               setServiceEditing(null);
             }}
           >
             <Input
               value={serviceEditing.name}
               onChange={(e) => setServiceEditing({ ...serviceEditing, name: e.target.value })}
-              placeholder="Service name"
+              placeholder={t("manager.pages.services.serviceNamePh")}
+              className="rounded-xl"
             />
             <div className="grid grid-cols-2 gap-2">
               <Input
                 type="number"
+                min={5}
+                max={480}
+                step={1}
                 value={serviceEditing.duration}
                 onChange={(e) => setServiceEditing({ ...serviceEditing, duration: e.target.value })}
-                placeholder="Duration"
+                placeholder={t("manager.pages.services.durationPh")}
+                className="rounded-xl"
               />
               <Input
                 type="number"
-                value={serviceEditing.price}
+                min={0}
+                step={0.01}
+                value={serviceEditing.price ?? ""}
                 onChange={(e) => setServiceEditing({ ...serviceEditing, price: e.target.value })}
-                placeholder="Price"
+                placeholder={t("manager.pages.services.pricePh")}
+                className="rounded-xl"
               />
             </div>
-            <Input
+            <Textarea
               value={serviceEditing.description || ""}
               onChange={(e) => setServiceEditing({ ...serviceEditing, description: e.target.value })}
-              placeholder="Description (optional)"
+              placeholder={t("manager.pages.services.descPh")}
+              className="rounded-xl"
             />
-            <Select
-              value={serviceEditing.categoryId || ""}
-              onChange={(e) => setServiceEditing({ ...serviceEditing, categoryId: e.target.value })}
-            >
-              <option value="">Select category (required)</option>
-              {categories.filter((c) => c.is_active || c.id === serviceEditing.categoryId).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-            {!serviceEditing.categoryId ? (
-              <p className="text-xs text-danger">Category is required for services.</p>
+            {(categories || []).length === 0 ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-950/25 px-3 py-3 text-sm text-amber-100">
+                <p className="font-medium text-foreground">{t("manager.pages.services.noCategoriesTitle")}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t("manager.pages.services.noCategoriesBody")}</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">{t("manager.pages.services.categoryFieldLabel")}</span>
+                <CategoryCombobox
+                  categories={categoriesForServiceModal}
+                  value={serviceEditing.categoryId || ""}
+                  onChange={(id) => setServiceEditing({ ...serviceEditing, categoryId: id })}
+                  placeholder={t("manager.pages.services.categoryRequired")}
+                  searchPlaceholder={t("manager.pages.services.searchCategoriesPlaceholder")}
+                  noResultsLabel={t("manager.pages.services.categoryNoResults")}
+                  aria-invalid={
+                    serviceSubmitAttempted && !String(serviceEditing.categoryId || "").trim() ? true : undefined
+                  }
+                  className="w-full"
+                />
+                {serviceSubmitAttempted && !String(serviceEditing.categoryId || "").trim() ? (
+                  <p className="text-xs text-destructive">{t("manager.pages.services.categorySelectInline")}</p>
+                ) : null}
+              </div>
+            )}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Button type="submit" disabled={!serviceFormValid} className="rounded-xl">
+                {t("common.save")}
+              </Button>
+              <Link
+                href={`/manager/${businessSlug}/services`}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                {t("manager.pages.services.openServicesPage")} →
+              </Link>
+            </div>
+            {!serviceFormValid && (categories || []).length > 0 ? (
+              <p className="text-[11px] text-muted-foreground">{t("manager.pages.services.saveDisabledHint")}</p>
             ) : null}
-            <button
-              disabled={!serviceEditing.categoryId}
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
-            >
-              Save
-            </button>
           </form>
         ) : null}
       </ManagerDialog>

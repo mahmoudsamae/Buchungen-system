@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   CalendarPlus,
@@ -30,7 +31,6 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
   const { t } = useLanguage();
   const base = `/teacher/${schoolSlug}`;
   const [data, setData] = useState(null);
-  const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [form, setForm] = useState({ fullName: "", phone: "", email: "" });
@@ -45,12 +45,8 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
-    const [res, svcRes] = await Promise.all([
-      teacherFetch(schoolSlug, `/api/teacher/students/${studentId}`),
-      teacherFetch(schoolSlug, "/api/teacher/services")
-    ]);
+    const res = await teacherFetch(schoolSlug, `/api/teacher/students/${studentId}`);
     const json = await res.json().catch(() => ({}));
-    const svcJson = await svcRes.json().catch(() => ({}));
     if (!res.ok) {
       setError(json.error || t("teacher.student.loadError"));
       setData(null);
@@ -61,7 +57,6 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
       setStatus(json.membership?.status || "active");
       setInternalNote(json.membership?.internal_note || "");
     }
-    if (svcRes.ok) setServices(svcJson.services || []);
     setLoading(false);
   }, [schoolSlug, studentId, t]);
 
@@ -367,7 +362,7 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
                               if (res.ok) await load();
                               else {
                                 const j = await res.json().catch(() => ({}));
-                                alert(j.error || "Could not approve");
+                                toast.error(j.error || "Could not approve");
                               }
                             }}
                           >
@@ -491,7 +486,6 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
             title={t("teacher.student.newBooking")}
             schoolSlug={schoolSlug}
             students={studentRow}
-            services={services}
             onCreated={() => load()}
           />
         </>

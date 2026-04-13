@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { Ban, CalendarClock, Check, CheckCircle2, Plus, RotateCcw, X } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { ManagerDialog } from "@/components/manager/dialog";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { teacherFetch } from "@/lib/teacher/teacher-fetch";
@@ -13,12 +15,57 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { TeacherManualBookingDialog } from "@/components/teacher/teacher-manual-booking-dialog";
 import { CompleteLessonDialog } from "@/components/manager/complete-lesson-dialog";
 import { BOOKING_STATUSES } from "@/lib/manager/booking-constants";
+import { hasBookingEnded, hasBookingStarted } from "@/lib/booking/booking-lifecycle";
+import { cn } from "@/lib/utils";
 
-export function TeacherBookingsClient({ schoolSlug }) {
+function bookingForEndCheck(b) {
+  return {
+    booking_date: b.date,
+    start_time: b.time,
+    end_time: b.endTime ? `${String(b.endTime).slice(0, 5)}:00` : null
+  };
+}
+
+function bookingForLifecycleUi(b) {
+  return {
+    booking_date: b.date,
+    start_time: b.time,
+    end_time: b.endTime ? `${String(b.endTime).slice(0, 5)}:00` : null
+  };
+}
+
+function normSlotStartKey(dateYmd, startHHMM) {
+  return `${String(dateYmd).slice(0, 10)}|${String(startHHMM).slice(0, 5)}`;
+}
+
+const actionBase =
+  "inline-flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50";
+
+const newBookingBtn =
+  "gap-2 rounded-xl border border-primary/35 bg-primary/95 px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/20 transition hover:border-primary/50 hover:bg-primary hover:shadow-xl hover:shadow-primary/25 focus-visible:ring-primary/60";
+
+const completeBtn =
+  `${actionBase} border-emerald-500/30 bg-emerald-950/35 text-emerald-100 hover:border-emerald-400/45 hover:bg-emerald-900/45 focus-visible:ring-emerald-500/50`;
+
+const rescheduleBtn =
+  `${actionBase} border-zinc-600/55 bg-zinc-900/60 text-zinc-100 hover:border-zinc-500/70 hover:bg-zinc-800/80 focus-visible:ring-zinc-400/45`;
+
+const cancelBtn =
+  `${actionBase} border-red-500/35 bg-red-950/30 text-red-100 hover:border-red-400/50 hover:bg-red-950/55 hover:text-red-50 focus-visible:ring-red-500/55`;
+
+const approveBtn =
+  `${actionBase} border-emerald-500/35 bg-emerald-950/30 text-emerald-100 hover:border-emerald-400/50 hover:bg-emerald-900/40 focus-visible:ring-emerald-500/50`;
+
+const rejectBtn =
+  `${actionBase} border-amber-500/35 bg-amber-950/25 text-amber-100 hover:border-amber-400/45 hover:bg-amber-950/45 focus-visible:ring-amber-500/50`;
+
+const restoreBtn =
+  `${actionBase} border-sky-500/35 bg-sky-950/30 text-sky-100 hover:border-sky-400/45 hover:bg-sky-900/40 focus-visible:ring-sky-500/50`;
+
+export function TeacherBookingsClient({ schoolSlug, businessTimeZone = "UTC" }) {
   const { t } = useLanguage();
   const [bookings, setBookings] = useState([]);
   const [students, setStudents] = useState([]);
-  const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [from, setFrom] = useState("");
@@ -28,9 +75,22 @@ export function TeacherBookingsClient({ schoolSlug }) {
   const [manualOpen, setManualOpen] = useState(false);
   const [completeBooking, setCompleteBooking] = useState(null);
   const [rescheduleBooking, setRescheduleBooking] = useState(null);
-  const [resDate, setResDate] = useState("");
-  const [resTime, setResTime] = useState("09:00");
   const [resBusy, setResBusy] = useState(false);
+  const [resSlotsLoading, setResSlotsLoading] = useState(false);
+  const [resDayLoading, setResDayLoading] = useState(false);
+  const [resNextSlots, setResNextSlots] = useState([]);
+  const [resBrowseDates, setResBrowseDates] = useState([]);
+  const [resDaySlots, setResDaySlots] = useState([]);
+  const [resBrowseDay, setResBrowseDay] = useState("");
+  const [resSelectedSlot, setResSelectedSlot] = useState(null);
+  const [resReason, setResReason] = useState("");
+  const [resModalError, setResModalError] = useState("");
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [allowTeachersToRestoreCancelledBookings, setAllowTeachersToRestoreCancelledBookings] = useState(false);
+  const [canTeacherRestoreCancelledBookings, setCanTeacherRestoreCancelledBookings] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreModalError, setRestoreModalError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,22 +99,23 @@ export function TeacherBookingsClient({ schoolSlug }) {
     if (from) qs.set("from", from);
     if (to) qs.set("to", to);
     const path = `/api/teacher/bookings${qs.toString() ? `?${qs}` : ""}`;
-    const [bRes, sRes, vRes] = await Promise.all([
+    const [bRes, sRes] = await Promise.all([
       teacherFetch(schoolSlug, path),
-      teacherFetch(schoolSlug, "/api/teacher/students"),
-      teacherFetch(schoolSlug, "/api/teacher/services")
+      teacherFetch(schoolSlug, "/api/teacher/students")
     ]);
     const bJson = await bRes.json().catch(() => ({}));
     const sJson = await sRes.json().catch(() => ({}));
-    const vJson = await vRes.json().catch(() => ({}));
     if (!bRes.ok) {
       setError(bJson.error || t("teacher.bookings.loadError"));
       setBookings([]);
+      setAllowTeachersToRestoreCancelledBookings(false);
+      setCanTeacherRestoreCancelledBookings(false);
     } else {
       setBookings(bJson.bookings || []);
+      setAllowTeachersToRestoreCancelledBookings(Boolean(bJson.allowTeachersToRestoreCancelledBookings));
+      setCanTeacherRestoreCancelledBookings(Boolean(bJson.canTeacherRestoreCancelledBookings));
     }
     if (sRes.ok) setStudents(sJson.students || []);
-    if (vRes.ok) setServices(vJson.services || []);
     setLoading(false);
   }, [schoolSlug, from, to, t]);
 
@@ -79,6 +140,82 @@ export function TeacherBookingsClient({ schoolSlug }) {
     });
   }, [bookings, studentFilter, statusFilter]);
 
+  /** Omit the chip that only repeats this booking’s current start (save uses start time only). */
+  const resNextSlotsChoice = useMemo(() => {
+    if (!rescheduleBooking) return resNextSlots;
+    const cur = normSlotStartKey(rescheduleBooking.date, rescheduleBooking.time);
+    return resNextSlots.filter((s) => normSlotStartKey(s.date, s.start) !== cur);
+  }, [resNextSlots, rescheduleBooking]);
+
+  const resDaySlotsChoice = useMemo(() => {
+    if (!rescheduleBooking || !resBrowseDay) return resDaySlots;
+    if (resBrowseDay !== String(rescheduleBooking.date).slice(0, 10)) return resDaySlots;
+    const cur = normSlotStartKey(rescheduleBooking.date, rescheduleBooking.time);
+    return resDaySlots.filter((s) => normSlotStartKey(resBrowseDay, s.start) !== cur);
+  }, [resDaySlots, rescheduleBooking, resBrowseDay]);
+
+  useEffect(() => {
+    if (!rescheduleBooking) return;
+    let cancelled = false;
+    (async () => {
+      setResSlotsLoading(true);
+      setResModalError("");
+      setResSelectedSlot(null);
+      setResReason("");
+      setResDaySlots([]);
+      setResBrowseDay("");
+      const base = new URLSearchParams({
+        customerUserId: rescheduleBooking.customerUserId,
+        excludeBookingId: rescheduleBooking.id
+      });
+      const [rNext, rBrowse] = await Promise.all([
+        teacherFetch(schoolSlug, `/api/teacher/bookings/reschedule-slots?${base}&next=8`),
+        teacherFetch(schoolSlug, `/api/teacher/bookings/reschedule-slots?${base}&browseDates=1&horizonDays=21`)
+      ]);
+      const jNext = await rNext.json().catch(() => ({}));
+      const jBrowse = await rBrowse.json().catch(() => ({}));
+      if (cancelled) return;
+      if (!rNext.ok) {
+        setResModalError(typeof jNext.error === "string" ? jNext.error : "Could not load available slots.");
+        setResNextSlots([]);
+      } else {
+        setResNextSlots(Array.isArray(jNext.nextSlots) ? jNext.nextSlots : []);
+      }
+      if (rBrowse.ok && Array.isArray(jBrowse.dates)) {
+        setResBrowseDates(jBrowse.dates);
+      } else {
+        setResBrowseDates([]);
+      }
+      setResSlotsLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rescheduleBooking?.id, rescheduleBooking?.customerUserId, schoolSlug]);
+
+  const loadRescheduleDaySlots = useCallback(
+    async (dateStr) => {
+      if (!rescheduleBooking || !dateStr) return;
+      setResDayLoading(true);
+      setResModalError("");
+      const qs = new URLSearchParams({
+        customerUserId: rescheduleBooking.customerUserId,
+        excludeBookingId: rescheduleBooking.id,
+        date: dateStr
+      });
+      const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/reschedule-slots?${qs}`);
+      const j = await res.json().catch(() => ({}));
+      setResDayLoading(false);
+      if (!res.ok) {
+        setResModalError(typeof j.error === "string" ? j.error : "Could not load slots for that day.");
+        setResDaySlots([]);
+        return;
+      }
+      setResDaySlots(Array.isArray(j.slots) ? j.slots : []);
+    },
+    [rescheduleBooking, schoolSlug]
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -86,8 +223,8 @@ export function TeacherBookingsClient({ schoolSlug }) {
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{t("teacher.bookings.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("teacher.bookings.subtitle")}</p>
         </div>
-        <Button type="button" className="gap-2 rounded-xl" onClick={() => setManualOpen(true)}>
-          <Plus className="h-4 w-4" />
+        <Button type="button" className={cn(newBookingBtn)} onClick={() => setManualOpen(true)}>
+          <Plus className="h-4 w-4 shrink-0 opacity-95" aria-hidden />
           {t("teacher.bookings.new")}
         </Button>
       </div>
@@ -162,12 +299,12 @@ export function TeacherBookingsClient({ schoolSlug }) {
                       <StatusBadge value={b.status} />
                     </td>
                     <td className="py-3">
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         {b.status === "pending" && (b.bookingSource === "student_request" || b.bookingSource === "portal") ? (
                           <>
                             <button
                               type="button"
-                              className="text-xs font-medium text-emerald-400 hover:underline"
+                              className={approveBtn}
                               onClick={async () => {
                                 const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/${b.id}/approve`, {
                                   method: "POST"
@@ -175,15 +312,16 @@ export function TeacherBookingsClient({ schoolSlug }) {
                                 if (res.ok) await load();
                                 else {
                                   const j = await res.json().catch(() => ({}));
-                                  alert(j.error || "Could not approve");
+                                  toast.error(j.error || "Could not approve");
                                 }
                               }}
                             >
+                              <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                               Approve
                             </button>
                             <button
                               type="button"
-                              className="text-xs font-medium text-danger hover:underline"
+                              className={rejectBtn}
                               onClick={async () => {
                                 if (!confirm("Reject this request?")) return;
                                 const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/${b.id}`, {
@@ -194,6 +332,7 @@ export function TeacherBookingsClient({ schoolSlug }) {
                                 if (res.ok) await load();
                               }}
                             >
+                              <X className="h-3.5 w-3.5 shrink-0" aria-hidden />
                               Reject
                             </button>
                           </>
@@ -201,38 +340,49 @@ export function TeacherBookingsClient({ schoolSlug }) {
                         {b.status === "confirmed" ? (
                           <button
                             type="button"
-                            className="text-xs font-medium text-primary hover:underline"
+                            className={completeBtn}
+                            disabled={!hasBookingEnded(bookingForEndCheck(b), businessTimeZone)}
+                            title={
+                              hasBookingEnded(bookingForEndCheck(b), businessTimeZone)
+                                ? undefined
+                                : "Available after the lesson end time (school timezone)."
+                            }
                             onClick={() => setCompleteBooking(b)}
                           >
+                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
                             {t("teacher.bookings.complete")}
+                          </button>
+                        ) : null}
+                        {canTeacherRestoreCancelledBookings &&
+                        (b.status === "cancelled_by_manager" || b.status === "cancelled_by_user") &&
+                        !hasBookingStarted(bookingForLifecycleUi(b), businessTimeZone) ? (
+                          <button
+                            type="button"
+                            className={restoreBtn}
+                            onClick={() => setRestoreTarget(b)}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                            {t("teacher.bookings.restore")}
                           </button>
                         ) : null}
                         {["pending", "confirmed"].includes(b.status) ? (
                           <>
                             <button
                               type="button"
-                              className="text-xs font-medium text-muted-foreground hover:underline"
+                              className={rescheduleBtn}
                               onClick={() => {
                                 setRescheduleBooking(b);
-                                setResDate(b.date);
-                                setResTime(b.time);
                               }}
                             >
+                              <CalendarClock className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
                               {t("teacher.bookings.reschedule")}
                             </button>
                             <button
                               type="button"
-                              className="text-xs font-medium text-danger hover:underline"
-                              onClick={async () => {
-                                if (!confirm("Cancel this booking?")) return;
-                                const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/${b.id}`, {
-                                  method: "PATCH",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ status: "cancelled_by_manager" })
-                                });
-                                if (res.ok) await load();
-                              }}
+                              className={cancelBtn}
+                              onClick={() => setCancelTarget(b)}
                             >
+                              <Ban className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
                               {t("teacher.bookings.cancel")}
                             </button>
                           </>
@@ -253,7 +403,6 @@ export function TeacherBookingsClient({ schoolSlug }) {
         title={t("teacher.bookings.new")}
         schoolSlug={schoolSlug}
         students={students}
-        services={services}
         onCreated={() => load()}
       />
 
@@ -267,46 +416,317 @@ export function TeacherBookingsClient({ schoolSlug }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
           });
-          if (!res.ok) return false;
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            toast.error(typeof j.error === "string" ? j.error : "Could not complete lesson.");
+            return false;
+          }
           await load();
           return true;
         }}
       />
 
+      <ManagerDialog open={Boolean(cancelTarget)} onClose={() => setCancelTarget(null)} title={t("teacher.bookings.cancel")}>
+        {cancelTarget ? (
+          <div className="space-y-4 text-sm">
+            <p className="rounded-lg border border-red-500/30 bg-red-950/25 px-3 py-2 text-red-100">
+              This will cancel the lesson for the student. This action cannot be undone from here.
+            </p>
+            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Student:</span> {cancelTarget.customer}
+              </p>
+              <p className="mt-1">
+                <span className="font-medium text-foreground">Lesson:</span> {cancelTarget.date} · {cancelTarget.time}
+                {cancelTarget.endTime ? `–${cancelTarget.endTime}` : ""}
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setCancelTarget(null)}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                className="rounded-xl"
+                onClick={async () => {
+                  const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/${cancelTarget.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: "cancelled_by_manager" })
+                  });
+                  setCancelTarget(null);
+                  if (res.ok) await load();
+                  else {
+                    const j = await res.json().catch(() => ({}));
+                    toast.error(typeof j.error === "string" ? j.error : "Could not cancel.");
+                  }
+                }}
+              >
+                Confirm cancellation
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </ManagerDialog>
+
+      <ManagerDialog
+        open={Boolean(restoreTarget)}
+        onClose={() => {
+          if (restoreBusy) return;
+          setRestoreTarget(null);
+          setRestoreModalError("");
+        }}
+        title={t("teacher.bookings.restoreTitle")}
+      >
+        {restoreTarget ? (
+          <div className="space-y-4 text-sm">
+            <p className="text-muted-foreground">{t("teacher.bookings.restoreConfirmBody")}</p>
+            <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Student:</span> {restoreTarget.customer}
+              </p>
+              <p className="mt-1">
+                <span className="font-medium text-foreground">Lesson:</span> {restoreTarget.date} · {restoreTarget.time}
+                {restoreTarget.endTime ? `–${restoreTarget.endTime}` : ""}
+              </p>
+            </div>
+            {restoreModalError ? (
+              <p className="rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-xs text-amber-100" role="alert">
+                {restoreModalError}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                disabled={restoreBusy}
+                onClick={() => {
+                  setRestoreTarget(null);
+                  setRestoreModalError("");
+                }}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                className="rounded-xl"
+                disabled={restoreBusy}
+                onClick={async () => {
+                  setRestoreModalError("");
+                  setRestoreBusy(true);
+                  const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/${restoreTarget.id}/restore`, {
+                    method: "POST"
+                  });
+                  const j = await res.json().catch(() => ({}));
+                  setRestoreBusy(false);
+                  if (res.ok) {
+                    setRestoreTarget(null);
+                    await load();
+                  } else {
+                    setRestoreModalError(typeof j.error === "string" ? j.error : t("teacher.bookings.restoreError"));
+                  }
+                }}
+              >
+                {restoreBusy ? t("common.loading") : t("teacher.bookings.restoreConfirm")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </ManagerDialog>
+
       <ManagerDialog
         open={Boolean(rescheduleBooking)}
-        onClose={() => setRescheduleBooking(null)}
+        onClose={() => {
+          setRescheduleBooking(null);
+          setResModalError("");
+          setResSelectedSlot(null);
+        }}
         title={t("teacher.bookings.reschedule")}
       >
         {rescheduleBooking ? (
           <form
-            className="space-y-3 text-sm"
+            className="space-y-4 text-sm"
             onSubmit={async (e) => {
               e.preventDefault();
+              if (!resSelectedSlot) {
+                setResModalError("Choose one of the available slots.");
+                return;
+              }
               setResBusy(true);
+              setResModalError("");
               const res = await teacherFetch(schoolSlug, `/api/teacher/bookings/${rescheduleBooking.id}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ date: resDate, time: resTime })
+                body: JSON.stringify({
+                  date: resSelectedSlot.date,
+                  time: resSelectedSlot.start,
+                  reschedule_reason: resReason.trim() || undefined
+                })
               });
               setResBusy(false);
+              const j = await res.json().catch(() => ({}));
               if (res.ok) {
                 setRescheduleBooking(null);
+                setResSelectedSlot(null);
+                setResReason("");
                 await load();
+              } else {
+                setResModalError(typeof j.error === "string" ? j.error : "Could not reschedule. Try another slot.");
               }
             }}
           >
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">Date</span>
-              <Input type="date" value={resDate} onChange={(e) => setResDate(e.target.value)} required className="rounded-xl" />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-xs text-muted-foreground">Start time</span>
-              <Input type="time" value={resTime} onChange={(e) => setResTime(e.target.value)} required className="rounded-xl" />
-            </label>
-            <Button type="submit" className="w-full rounded-xl" disabled={resBusy}>
-              {resBusy ? "…" : "Save"}
-            </Button>
+            <div className="rounded-xl border border-border/60 bg-zinc-950/40 px-3 py-2.5 text-xs text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Student:</span> {rescheduleBooking.customer}
+              </p>
+              <p className="mt-1">
+                <span className="font-medium text-foreground">Current time:</span> {rescheduleBooking.date} · {rescheduleBooking.time}
+                {rescheduleBooking.endTime ? `–${rescheduleBooking.endTime}` : ""}
+              </p>
+            </div>
+
+            {resModalError ? (
+              <div className="rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-xs text-amber-100" role="alert">
+                {resModalError}
+              </div>
+            ) : null}
+
+            {resSlotsLoading ? (
+              <p className="text-xs text-muted-foreground">Loading available slots…</p>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Next available slots</p>
+                  {resNextSlots.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No immediate slots found in the next few weeks. Pick a day below.</p>
+                  ) : resNextSlotsChoice.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No other start times in the quick list yet — your current start is omitted. Browse by day below.
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {resNextSlotsChoice.map((s) => {
+                        const key = `${s.date}-${s.start}-${s.end}`;
+                        const active =
+                          resSelectedSlot &&
+                          resSelectedSlot.date === s.date &&
+                          resSelectedSlot.start === s.start &&
+                          resSelectedSlot.end === s.end;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              setResSelectedSlot({ date: s.date, start: s.start, end: s.end });
+                              setResModalError("");
+                            }}
+                            className={cn(
+                              "rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium tabular-nums transition",
+                              active
+                                ? "border-primary/60 bg-primary/15 text-foreground ring-1 ring-primary/40"
+                                : "border-border/60 bg-card/50 text-muted-foreground hover:border-border hover:bg-muted/30"
+                            )}
+                          >
+                            <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{s.date}</span>
+                            {s.start}–{s.end}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 border-t border-border/40 pt-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Browse by day</p>
+                  <Select
+                    value={resBrowseDay}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setResBrowseDay(v);
+                      setResModalError("");
+                      if (v) loadRescheduleDaySlots(v);
+                      else setResDaySlots([]);
+                    }}
+                  >
+                    <option value="">Select a date…</option>
+                    {resBrowseDates.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </Select>
+                  {resDayLoading ? (
+                    <p className="text-xs text-muted-foreground">Loading slots…</p>
+                  ) : resBrowseDay && resDaySlots.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No bookable windows on this day.</p>
+                  ) : resBrowseDay && resDaySlotsChoice.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      Only your current start time is open on this day — pick another date or contact the school.
+                    </p>
+                  ) : resBrowseDay ? (
+                    <div className="flex flex-wrap gap-2">
+                      {resDaySlotsChoice.map((s) => {
+                        const key = `${resBrowseDay}-${s.start}-${s.end}`;
+                        const active =
+                          resSelectedSlot &&
+                          resSelectedSlot.date === resBrowseDay &&
+                          resSelectedSlot.start === s.start &&
+                          resSelectedSlot.end === s.end;
+                        return (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              setResSelectedSlot({ date: resBrowseDay, start: s.start, end: s.end });
+                              setResModalError("");
+                            }}
+                            className={cn(
+                              "rounded-lg border px-2.5 py-1.5 text-xs font-medium tabular-nums transition",
+                              active
+                                ? "border-primary/60 bg-primary/15 text-foreground ring-1 ring-primary/40"
+                                : "border-border/60 bg-card/50 text-muted-foreground hover:border-border hover:bg-muted/30"
+                            )}
+                          >
+                            {s.start}–{s.end}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">Note for your records (optional)</span>
+                  <Textarea
+                    value={resReason}
+                    onChange={(e) => setResReason(e.target.value)}
+                    placeholder="Reason for moving the lesson…"
+                    rows={2}
+                    className="min-h-[64px] rounded-xl border-border/60 bg-background/50 text-sm"
+                  />
+                </label>
+              </>
+            )}
+
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border/40 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => {
+                  setRescheduleBooking(null);
+                  setResModalError("");
+                  setResSelectedSlot(null);
+                }}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button type="submit" className="rounded-xl" disabled={resBusy || resSlotsLoading || !resSelectedSlot}>
+                {resBusy ? "Saving…" : "Save new time"}
+              </Button>
+            </div>
           </form>
         ) : null}
       </ManagerDialog>

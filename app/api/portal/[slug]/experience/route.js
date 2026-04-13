@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveStudentPortalBookingWindow } from "@/lib/booking/student-booking-window";
 import { fetchTeacherSettingsMerged } from "@/lib/data/teacher-settings";
 import { resolvePortalBookingWindow } from "@/lib/booking/portal-booking-window";
 import { createClient } from "@/lib/supabase/server";
@@ -24,15 +25,19 @@ export async function GET(request, { params }) {
     .eq("status", "active")
     .maybeSingle();
   if (!mem) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const portalWindow = resolvePortalBookingWindow(biz);
+  let portalWindow = resolvePortalBookingWindow(biz);
 
   let teacherAllowsReschedule = true;
   let teacherAllowsCancel = true;
   const pid = mem.primary_instructor_user_id || null;
   if (pid) {
-    const { settings } = await fetchTeacherSettingsMerged(supabase, biz.id, pid);
+    const { settings } = await fetchTeacherSettingsMerged(supabase, biz.id, pid, {
+      readTeacherRowWithServiceRole: true,
+      businessRow: biz
+    });
     teacherAllowsReschedule = settings.students_can_reschedule_their_own_bookings !== false;
     teacherAllowsCancel = settings.students_can_cancel_their_own_bookings !== false;
+    portalWindow = resolveStudentPortalBookingWindow(biz, settings);
   }
 
   const bizAllowsReschedule = biz.allow_customer_reschedule !== false;

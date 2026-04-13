@@ -61,6 +61,7 @@ function TeacherProfileInner() {
           error={error}
           loading={loading}
           onReload={load}
+          onTeacherDetailUpdate={(next) => setData(next)}
         />
       </main>
     </>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
+import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assertTeacherOwnsStudent } from "@/lib/data/teacher-workspace";
 import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
@@ -198,6 +199,46 @@ export async function PATCH(request, { params }) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const profileFieldsRequested = body.fullName != null || body.phone != null || body.email != null;
+  const statusRequested = body.status != null;
+  const profileOrStatusRequested = profileFieldsRequested || statusRequested;
+  if (profileOrStatusRequested) {
+    const { data: currentMembership } = await admin
+      .from("business_users")
+      .select("status")
+      .eq("business_id", business.id)
+      .eq("user_id", studentId)
+      .eq("role", "customer")
+      .maybeSingle();
+    const { data: currentProfile } = await admin.from("profiles").select("full_name, phone, email").eq("id", studentId).maybeSingle();
+
+    const requestedStatus = body.status != null ? String(body.status) : null;
+    const currentStatus = currentMembership?.status != null ? String(currentMembership.status) : null;
+    const statusChanged = requestedStatus != null && requestedStatus !== currentStatus;
+
+    const normalizePhone = (v) => (v == null ? "" : String(v).trim());
+    const requestedFullName = body.fullName != null ? String(body.fullName) : null;
+    const requestedPhone = body.phone != null ? normalizePhone(body.phone) : null;
+    const requestedEmail = body.email != null ? String(body.email).trim().toLowerCase() : null;
+    const currentFullName = currentProfile?.full_name != null ? String(currentProfile.full_name) : "";
+    const currentPhone = normalizePhone(currentProfile?.phone);
+    const currentEmail = currentProfile?.email != null ? String(currentProfile.email).trim().toLowerCase() : "";
+    const profileChanged =
+      (requestedFullName != null && requestedFullName !== currentFullName) ||
+      (requestedPhone != null && requestedPhone !== currentPhone) ||
+      (requestedEmail != null && requestedEmail !== currentEmail);
+
+    if (statusChanged || profileChanged) {
+      if (statusChanged && ["inactive", "suspended"].includes(requestedStatus)) {
+        const d = await assertTeacherCapability(business.id, user.id, "can_deactivate_students");
+        if (!d.ok) return NextResponse.json({ error: d.message }, { status: d.status });
+      } else {
+        const e = await assertTeacherCapability(business.id, user.id, "can_edit_students");
+        if (!e.ok) return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+    }
+  }
+
   if (body.fullName != null || body.phone != null || body.email != null) {
     const p = {};
     if (body.fullName != null) p.full_name = String(body.fullName);
@@ -225,6 +266,8 @@ export async function PATCH(request, { params }) {
   }
 
   if (body.internalNote !== undefined) {
+    const n = await assertTeacherCapability(business.id, user.id, "can_write_internal_notes");
+    if (!n.ok) return NextResponse.json({ error: n.message }, { status: n.status });
     const raw = body.internalNote;
     const internal_note = raw == null || String(raw).trim() === "" ? null : String(raw).trim();
     const { error } = await admin

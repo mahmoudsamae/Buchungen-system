@@ -1,7 +1,5 @@
-import { redirect } from "next/navigation";
+import { SchoolServicesPageClient } from "@/components/manager/school-services-page-client";
 
-/** Services are edited on the Categories page (`/categories`). */
-export default async function ServicesPage({ params }) {
-  const { slug } = await params;
-  redirect(`/manager/${slug}/categories`);
+export default function ServicesPage() {
+  return <SchoolServicesPageClient />;
 }

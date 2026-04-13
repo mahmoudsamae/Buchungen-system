@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
+import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
 import { timeToMinutes, timesOverlapHalfOpenMinutes } from "@/lib/manager/booking-time";
 
 function overlap(aStart, aEnd, bStart, bEnd) {
@@ -16,6 +17,9 @@ export async function PATCH(request, { params }) {
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
   const { id } = await params;
+
+  const cap = await assertTeacherCapability(business.id, user.id, "can_manage_own_availability");
+  if (!cap.ok) return NextResponse.json({ error: cap.message }, { status: cap.status });
 
   let body;
   try {
@@ -108,6 +112,9 @@ export async function DELETE(request, { params }) {
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
   const { id } = await params;
+
+  const cap = await assertTeacherCapability(business.id, user.id, "can_manage_own_availability");
+  if (!cap.ok) return NextResponse.json({ error: cap.message }, { status: cap.status });
 
   const { error } = await supabase
     .from("teacher_availability_rules")

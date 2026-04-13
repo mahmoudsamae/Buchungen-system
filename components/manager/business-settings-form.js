@@ -543,6 +543,13 @@ export function BusinessSettingsForm() {
             onChange={(v) => update({ allowCustomerReschedule: v })}
             disabled={saving}
           />
+          <ToggleField
+            label={t("manager.settings.exp.allowTeacherRestoreCancelled")}
+            hint={t("manager.settings.exp.allowTeacherRestoreCancelledHint")}
+            checked={form.allowTeachersToRestoreCancelledBookings}
+            onChange={(v) => update({ allowTeachersToRestoreCancelledBookings: v })}
+            disabled={saving}
+          />
         </Section>
 
         {clientError ? (

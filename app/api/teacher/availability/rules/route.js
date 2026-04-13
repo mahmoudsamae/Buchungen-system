@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
+import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
 import { timeToMinutes, timesOverlapHalfOpenMinutes } from "@/lib/manager/booking-time";
 
 function overlap(aStart, aEnd, bStart, bEnd) {
@@ -37,6 +38,9 @@ export async function POST(request) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
+
+  const cap = await assertTeacherCapability(business.id, user.id, "can_manage_own_availability");
+  if (!cap.ok) return NextResponse.json({ error: cap.message }, { status: cap.status });
 
   let body;
   try {

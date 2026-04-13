@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
+import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 import { listTeacherStudentsForTable } from "@/lib/data/teacher-workspace";
@@ -21,6 +22,9 @@ export async function POST(request) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
   const { business, user } = g.ctx;
+
+  const cap = await assertTeacherCapability(business.id, user.id, "can_create_students");
+  if (!cap.ok) return NextResponse.json({ error: cap.message }, { status: cap.status });
 
   let body;
   try {

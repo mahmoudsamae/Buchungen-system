@@ -404,11 +404,9 @@ export default function AvailabilityPage() {
                         const hasOpenRows = scopeRows.some((r) => !r.is_closed);
 
                         if (!overrideClosed && hasClosed) {
-                          if (typeof window !== "undefined") {
-                            window.alert(
-                              "This date is already marked as closed for this category scope. Remove/disable the closed entry first."
-                            );
-                          }
+                          setOverridesToast(
+                            "This date is already marked as closed for this category scope. Remove/disable the closed entry first."
+                          );
                           return;
                         }
                         if (overrideClosed && hasOpenRows) {
