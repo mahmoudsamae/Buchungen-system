@@ -23,12 +23,15 @@ export async function POST(request) {
     .toLowerCase();
   const role = String(body.role || "").toLowerCase();
 
-  if (!slug || (role !== "manager" && role !== "staff")) {
-    return NextResponse.json({ error: "slug and role (manager|staff) required" }, { status: 400 });
+  if (role !== "manager" && role !== "staff") {
+    return NextResponse.json({ error: "role (manager|staff) required" }, { status: 400 });
+  }
+  if (role === "staff" && !slug) {
+    return NextResponse.json({ error: "slug is required for staff login" }, { status: 400 });
   }
 
   if (role === "manager") {
-    const ctx = await requireManagerContext({ slug, cachedSession: session });
+    const ctx = await requireManagerContext({ slug: slug || undefined, cachedSession: session });
     if (!ctx) {
       return NextResponse.json({ error: "No active school administrator membership for this account." }, { status: 403 });
     }

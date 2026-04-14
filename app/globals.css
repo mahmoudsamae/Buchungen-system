@@ -44,6 +44,35 @@ body {
   font-family: Inter, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif;
 }
 
+/* Premium scrollbar — page + scrollable regions (dark-friendly, slim, rounded) */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.32) hsl(var(--background));
+}
+
+html::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+html::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+  border-radius: 9999px;
+}
+
+html::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.22);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
 .page-shell {
   @apply mx-auto w-full max-w-7xl px-4 py-6 md:px-6 md:py-8;
 }
@@ -51,5 +80,35 @@ body {
 @layer components {
   .surface-card {
     @apply rounded-xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md hover:border-border;
+  }
+}
+
+@layer utilities {
+  .scrollbar-premium {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 9999px;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.22);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .scrollbar-premium::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.38);
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
 }
