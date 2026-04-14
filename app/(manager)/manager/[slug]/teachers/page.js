@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { KeyRound, Mail, UserRound, UserX } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ChevronDown, KeyRound, Mail, UserCheck, UserRound, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/navigation/page-header";
 import { useManager } from "@/components/manager/provider";
@@ -27,6 +28,10 @@ const recoveryBtn =
   `${listActionBase} border-border/70 bg-zinc-900/55 text-zinc-100 hover:border-border hover:bg-zinc-800/80 focus-visible:ring-zinc-400/40`;
 const deactivateBtn =
   `${listActionBase} border-danger/45 bg-danger/15 text-danger hover:border-danger/60 hover:bg-danger/20 focus-visible:ring-danger/50`;
+const activateBtn =
+  `${listActionBase} border-emerald-500/35 bg-emerald-950/30 text-emerald-100 hover:border-emerald-400/50 hover:bg-emerald-900/45 focus-visible:ring-emerald-500/45`;
+const moreBtn =
+  `${listActionBase} border-border/70 bg-background/70 text-muted-foreground hover:border-border hover:bg-muted/40 hover:text-foreground focus-visible:ring-zinc-400/40`;
 
 export default function TeachersPage() {
   const { business } = useManager();
@@ -38,9 +43,12 @@ export default function TeachersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [accessTeacher, setAccessTeacher] = useState(null);
   const [deactivateTarget, setDeactivateTarget] = useState(null);
+  const [activateTarget, setActivateTarget] = useState(null);
+  const [openMenu, setOpenMenu] = useState(null);
   const [insights, setInsights] = useState(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const menuBtnRefs = useRef(new Map());
 
   const staffRows = useMemo(() => rows.filter((r) => r.role === "staff"), [rows]);
 
@@ -105,6 +113,29 @@ export default function TeachersPage() {
     };
   }, [slug]);
 
+  useEffect(() => {
+    if (!openMenu) return;
+    const onWindowChange = () => setOpenMenu(null);
+    const onDocClick = (e) => {
+      const trigger = menuBtnRefs.current.get(openMenu.userId);
+      if (trigger && trigger.contains(e.target)) return;
+      setOpenMenu(null);
+    };
+    const onEscape = (e) => {
+      if (e.key === "Escape") setOpenMenu(null);
+    };
+    window.addEventListener("resize", onWindowChange);
+    window.addEventListener("scroll", onWindowChange, true);
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      window.removeEventListener("resize", onWindowChange);
+      window.removeEventListener("scroll", onWindowChange, true);
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [openMenu]);
+
   async function resetTeacherPassword(userId) {
     const res = await managerFetch(slug, `/api/manager/team/${userId}/reset-password`, { method: "POST" });
     const j = await res.json().catch(() => ({}));
@@ -130,6 +161,36 @@ export default function TeachersPage() {
     toast.success("Teacher deactivated.");
     setDeactivateTarget(null);
     await load();
+  }
+
+  async function confirmActivate() {
+    if (!activateTarget) return;
+    const res = await managerFetch(slug, `/api/manager/team/${activateTarget.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "active" })
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(j.error || "Failed.");
+      return;
+    }
+    toast.success("Teacher activated.");
+    setActivateTarget(null);
+    await load();
+  }
+
+  function openRowMenuFor(userId, user) {
+    const el = menuBtnRefs.current.get(userId);
+    if (!el || typeof window === "undefined") return;
+    const rect = el.getBoundingClientRect();
+    const menuWidth = 224;
+    const menuHeight = 180;
+    const left = Math.min(Math.max(8, rect.right - menuWidth), window.innerWidth - menuWidth - 8);
+    const belowTop = rect.bottom + 6;
+    const aboveTop = rect.top - menuHeight - 6;
+    const top = belowTop + menuHeight > window.innerHeight - 8 ? Math.max(8, aboveTop) : belowTop;
+    setOpenMenu({ userId, user, left, top });
   }
 
   function onTeacherCreated(u) {
@@ -193,7 +254,7 @@ export default function TeachersPage() {
                 </Button>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto overflow-y-visible">
                 <table className="w-full min-w-[880px] text-sm">
                   <thead>
                     <tr className="border-b text-left text-muted-foreground">
@@ -230,39 +291,29 @@ export default function TeachersPage() {
                           <td className="py-3 pr-3 tabular-nums text-muted-foreground">
                             {d?.cancellationRatePct != null ? `${d.cancellationRatePct}%` : "—"}
                           </td>
-                          <td className="py-3 text-right">
+                          <td className="relative py-3 text-right">
                             <div className="flex flex-wrap items-center justify-end gap-1.5">
                               <Link
                                 href={`/manager/${slug}/teachers/${u.id}`}
                                 className={profileBtn}
                               >
                                 <UserRound className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                {t("manager.teachers.viewProfile")}
+                                Profil
                               </Link>
                               <button
+                                ref={(el) => {
+                                  if (el) menuBtnRefs.current.set(u.id, el);
+                                  else menuBtnRefs.current.delete(u.id);
+                                }}
                                 type="button"
-                                onClick={() => setAccessTeacher(u)}
-                                className={accessBtn}
+                                onClick={() => {
+                                  if (openMenu?.userId === u.id) setOpenMenu(null);
+                                  else openRowMenuFor(u.id, u);
+                                }}
+                                className={moreBtn}
                               >
-                                <KeyRound className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                {t("manager.teachers.access")}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => resetTeacherPassword(u.id)}
-                                className={recoveryBtn}
-                              >
-                                <Mail className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                {t("access.sendRecovery")}
-                              </button>
-                              <button
-                                type="button"
-                                disabled={u.status !== "active"}
-                                onClick={() => setDeactivateTarget(u)}
-                                className={deactivateBtn}
-                              >
-                                <UserX className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                                {t("manager.teachers.deactivate")}
+                                  More
+                                  <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
                               </button>
                             </div>
                           </td>
@@ -308,6 +359,73 @@ export default function TeachersPage() {
         onCancel={() => setDeactivateTarget(null)}
         onConfirm={confirmDeactivate}
       />
+
+      <ConfirmDialog
+        open={Boolean(activateTarget)}
+        title="Activate teacher?"
+        description="This teacher will regain account access and appear in active team views."
+        onCancel={() => setActivateTarget(null)}
+        onConfirm={confirmActivate}
+      />
+
+      {openMenu && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="fixed z-[120] w-56 rounded-xl border border-border/60 bg-card/95 p-1.5 text-left shadow-xl backdrop-blur"
+              style={{ left: openMenu.left, top: openMenu.top }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenMenu(null);
+                  setAccessTeacher(openMenu.user);
+                }}
+                className={`${accessBtn} w-full justify-start`}
+              >
+                <KeyRound className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                {t("manager.teachers.access")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenMenu(null);
+                  resetTeacherPassword(openMenu.user.id);
+                }}
+                className={`${recoveryBtn} mt-1 w-full justify-start`}
+              >
+                <Mail className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                Send password reset email
+              </button>
+              {openMenu.user.status === "active" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setDeactivateTarget(openMenu.user);
+                  }}
+                  className={`${deactivateBtn} mt-1 w-full justify-start`}
+                >
+                  <UserX className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                  {t("manager.teachers.deactivate")}
+                </button>
+              ) : null}
+              {openMenu.user.status === "inactive" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    setActivateTarget(openMenu.user);
+                  }}
+                  className={`${activateBtn} mt-1 w-full justify-start`}
+                >
+                  <UserCheck className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                  Activate
+                </button>
+              ) : null}
+            </div>,
+            document.body
+          )
+        : null}
     </>
   );
 }

@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { KeyRound, Mail, UserX } from "lucide-react";
+import { KeyRound, Mail, UserCheck, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { SchoolKpiCard } from "@/components/school/school-kpi-card";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { TeacherAccessModal } from "@/components/manager/teacher-access-modal";
-import { ConfirmDialog } from "@/components/manager/dialog";
+import { ConfirmDialog, ManagerDialog } from "@/components/manager/dialog";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { managerFetch } from "@/lib/manager/manager-fetch";
 import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
@@ -17,7 +20,7 @@ import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recha
 import { SchoolTeacherManagementPanel } from "@/components/school/school-teacher-management-panel";
 import { SchoolTeacherServicesTab } from "@/components/school/school-teacher-services-tab";
 
-const TABS = ["overview", "management", "services", "students", "bookings", "calendar", "availability", "analytics"];
+const TABS = ["overview", "profile", "management", "services", "students", "bookings", "calendar", "availability", "analytics"];
 const actionBase =
   "inline-flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold tracking-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-45";
 const accessBtn =
@@ -26,6 +29,8 @@ const recoveryBtn =
   `${actionBase} border-border/70 bg-zinc-900/55 text-zinc-100 hover:border-border hover:bg-zinc-800/80 focus-visible:ring-zinc-400/40`;
 const deactivateBtn =
   `${actionBase} border-danger/45 bg-danger/15 text-danger hover:border-danger/60 hover:bg-danger/20 focus-visible:ring-danger/50`;
+const activateBtn =
+  `${actionBase} border-emerald-500/35 bg-emerald-950/30 text-emerald-100 hover:border-emerald-400/50 hover:bg-emerald-900/45 focus-visible:ring-emerald-500/45`;
 
 export function SchoolTeacherProfileView({ slug, userId, businessName, data, error, loading, onReload, onTeacherDetailUpdate }) {
   const { t } = useLanguage();
@@ -36,7 +41,20 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
 
   const [accessOpen, setAccessOpen] = useState(false);
   const [deactivateOpen, setDeactivateOpen] = useState(false);
+  const [activateOpen, setActivateOpen] = useState(false);
   const [acting, setActing] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ password: "", confirm: "" });
+  const [passwordError, setPasswordError] = useState("");
+  const [coreSaving, setCoreSaving] = useState(false);
+  const [core, setCore] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+    title: "",
+    status: "active"
+  });
 
   const setTab = useCallback(
     (next) => {
@@ -49,6 +67,17 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
 
   const name = data?.profile?.full_name || data?.profile?.email || "Teacher";
   const isStaff = data?.membership?.role === "staff";
+
+  useEffect(() => {
+    if (!data) return;
+    setCore({
+      fullName: data.profile?.full_name || "",
+      email: data.profile?.email || "",
+      phone: data.profile?.phone || "",
+      title: data.staffExtension?.title || "",
+      status: data.membership?.status || "active"
+    });
+  }, [data]);
 
   const resetPassword = async () => {
     if (!slug || !userId) return;
@@ -80,6 +109,78 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
     toast.success("Teacher deactivated.");
     setDeactivateOpen(false);
     onReload();
+  };
+
+  const activate = async () => {
+    if (!slug || !userId) return;
+    setActing(true);
+    const res = await managerFetch(slug, `/api/manager/team/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "active" })
+    });
+    setActing(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      toast.error(j.error || "Failed.");
+      return;
+    }
+    toast.success("Teacher activated.");
+    setActivateOpen(false);
+    onReload();
+  };
+
+  const saveCore = async () => {
+    if (!slug || !userId) return;
+    setCoreSaving(true);
+    const res = await managerFetch(slug, `/api/manager/teachers/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fullName: core.fullName.trim(),
+        email: core.email.trim(),
+        phone: core.phone.trim(),
+        title: core.title.trim() || null,
+        status: core.status
+      })
+    });
+    setCoreSaving(false);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast.error(j.error || "Could not save teacher profile.");
+      return;
+    }
+    toast.success("Teacher profile updated.");
+    onReload();
+  };
+
+  const savePassword = async () => {
+    const password = String(passwordForm.password || "");
+    const confirm = String(passwordForm.confirm || "");
+    if (password.length < 8) {
+      setPasswordError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== confirm) {
+      setPasswordError("Passwords do not match.");
+      return;
+    }
+    setPasswordError("");
+    setPasswordSaving(true);
+    const res = await managerFetch(slug, `/api/manager/team/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password })
+    });
+    setPasswordSaving(false);
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setPasswordError(j.error || "Could not update password.");
+      return;
+    }
+    toast.success("Teacher password updated.");
+    setPasswordOpen(false);
+    setPasswordForm({ password: "", confirm: "" });
   };
 
   const bookingsByDate = useMemo(() => {
@@ -156,17 +257,43 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
                     className={recoveryBtn}
                   >
                     <Mail className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                    {t("access.sendRecovery")}
+                    Send password reset email
                   </button>
                   <button
                     type="button"
-                    disabled={acting || data.membership.status !== "active"}
-                    onClick={() => setDeactivateOpen(true)}
-                    className={deactivateBtn}
+                    disabled={acting}
+                    onClick={() => {
+                      setPasswordError("");
+                      setPasswordForm({ password: "", confirm: "" });
+                      setPasswordOpen(true);
+                    }}
+                    className={recoveryBtn}
                   >
-                    <UserX className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
-                    {t("manager.teachers.deactivate")}
+                    <KeyRound className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                    Set new password
                   </button>
+                  {data.membership.status === "active" ? (
+                    <button
+                      type="button"
+                      disabled={acting}
+                      onClick={() => setDeactivateOpen(true)}
+                      className={deactivateBtn}
+                    >
+                      <UserX className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                      {t("manager.teachers.deactivate")}
+                    </button>
+                  ) : null}
+                  {data.membership.status === "inactive" ? (
+                    <button
+                      type="button"
+                      disabled={acting}
+                      onClick={() => setActivateOpen(true)}
+                      className={activateBtn}
+                    >
+                      <UserCheck className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                      Activate
+                    </button>
+                  ) : null}
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">School administrator account — manage via team settings.</p>
@@ -183,10 +310,74 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
                     tab === id ? "bg-primary/15 text-foreground ring-1 ring-primary/25" : "text-muted-foreground hover:bg-muted/40"
                   }`}
                 >
-                  {t(`school.teacher.tabs.${id}`)}
+                  {id === "profile" ? "Profil" : t(`school.teacher.tabs.${id}`)}
                 </button>
               ))}
             </div>
+
+            {tab === "profile" ? (
+              <Card className="rounded-2xl border-border/60 shadow-soft">
+                <CardHeader>
+                  <CardTitle className="text-base">Teacher account details</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Core account fields for this teacher. Permissions and policy stay in the Management tab.
+                  </p>
+                </CardHeader>
+                <CardContent className="grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-xs">
+                    <span className="text-muted-foreground">Full name</span>
+                    <Input
+                      value={core.fullName}
+                      onChange={(e) => setCore((prev) => ({ ...prev, fullName: e.target.value }))}
+                      className="rounded-xl"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs">
+                    <span className="text-muted-foreground">Email</span>
+                    <Input
+                      type="email"
+                      value={core.email}
+                      onChange={(e) => setCore((prev) => ({ ...prev, email: e.target.value }))}
+                      className="rounded-xl"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs">
+                    <span className="text-muted-foreground">Phone</span>
+                    <Input
+                      value={core.phone}
+                      onChange={(e) => setCore((prev) => ({ ...prev, phone: e.target.value }))}
+                      className="rounded-xl"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs">
+                    <span className="text-muted-foreground">Title / specialization</span>
+                    <Input
+                      value={core.title}
+                      onChange={(e) => setCore((prev) => ({ ...prev, title: e.target.value }))}
+                      className="rounded-xl"
+                      placeholder="e.g. Senior instructor"
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs sm:col-span-2">
+                    <span className="text-muted-foreground">Account status</span>
+                    <Select
+                      value={core.status}
+                      onChange={(e) => setCore((prev) => ({ ...prev, status: e.target.value }))}
+                      className="rounded-xl"
+                    >
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                      <option value="suspended">suspended</option>
+                    </Select>
+                  </label>
+                  <div className="sm:col-span-2 flex justify-end">
+                    <Button type="button" className="rounded-xl" disabled={coreSaving} onClick={saveCore}>
+                      {coreSaving ? "Saving..." : "Save core profile"}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
 
             {tab === "management" ? (
               <SchoolTeacherManagementPanel
@@ -414,6 +605,58 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
         onCancel={() => setDeactivateOpen(false)}
         onConfirm={deactivate}
       />
+
+      <ConfirmDialog
+        open={activateOpen}
+        title="Activate teacher?"
+        description="They will regain account access and appear in active views again."
+        onCancel={() => setActivateOpen(false)}
+        onConfirm={activate}
+      />
+
+      <ManagerDialog
+        open={passwordOpen}
+        onClose={() => {
+          if (passwordSaving) return;
+          setPasswordOpen(false);
+        }}
+        title="Set new teacher password"
+      >
+        <div className="space-y-3 text-sm">
+          <p className="text-muted-foreground">
+            Set a new password directly for this teacher account. The teacher can use it immediately on next login.
+          </p>
+          <label className="block space-y-1 text-xs">
+            <span className="text-muted-foreground">New password</span>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={passwordForm.password}
+              onChange={(e) => setPasswordForm((prev) => ({ ...prev, password: e.target.value }))}
+              className="rounded-xl"
+            />
+          </label>
+          <label className="block space-y-1 text-xs">
+            <span className="text-muted-foreground">Confirm new password</span>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={passwordForm.confirm}
+              onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirm: e.target.value }))}
+              className="rounded-xl"
+            />
+          </label>
+          {passwordError ? <p className="text-xs text-destructive">{passwordError}</p> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" className="rounded-xl" disabled={passwordSaving} onClick={() => setPasswordOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" className="rounded-xl" disabled={passwordSaving} onClick={savePassword}>
+              {passwordSaving ? "Saving..." : "Save password"}
+            </Button>
+          </div>
+        </div>
+      </ManagerDialog>
     </>
   );
 }

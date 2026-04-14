@@ -45,6 +45,15 @@ export async function PATCH(request, { params }) {
     }
   }
 
+  if (body.password != null) {
+    const password = String(body.password || "");
+    if (password.length < 8) {
+      return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
+    }
+    const { error: pe } = await admin.auth.admin.updateUserById(userId, { password });
+    if (pe) return NextResponse.json({ error: pe.message }, { status: 400 });
+  }
+
   if (body.status && ["active", "inactive", "suspended"].includes(body.status)) {
     if (membership.role === "manager" && body.status !== "active" && userId === managerUser.id) {
       return NextResponse.json({ error: "You cannot suspend or deactivate your own owner account while logged in." }, { status: 400 });
