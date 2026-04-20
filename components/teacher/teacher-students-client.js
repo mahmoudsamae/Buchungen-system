@@ -19,9 +19,10 @@ export function TeacherStudentsClient({ schoolSlug }) {
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ fullName: "", email: "", phone: "", password: "" });
+  const [form, setForm] = useState({ fullName: "", email: "", phone: "", password: "", categoryId: "" });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [allowedCategories, setAllowedCategories] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,6 +41,21 @@ export function TeacherStudentsClient({ schoolSlug }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const res = await teacherFetch(schoolSlug, "/api/teacher/services");
+      const j = await res.json().catch(() => ({}));
+      if (!active) return;
+      if (res.ok) {
+        setAllowedCategories(Array.isArray(j.categories) ? j.categories : []);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [schoolSlug]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -136,7 +152,8 @@ export function TeacherStudentsClient({ schoolSlug }) {
                 fullName: form.fullName.trim(),
                 email: form.email.trim(),
                 phone: form.phone.trim(),
-                password: form.password
+                password: form.password,
+                categoryId: form.categoryId || null
               })
             });
             const json = await res.json().catch(() => ({}));
@@ -146,7 +163,7 @@ export function TeacherStudentsClient({ schoolSlug }) {
               return;
             }
             setOpen(false);
-            setForm({ fullName: "", email: "", phone: "", password: "" });
+            setForm({ fullName: "", email: "", phone: "", password: "", categoryId: "" });
             await load();
           }}
         >
@@ -184,6 +201,24 @@ export function TeacherStudentsClient({ schoolSlug }) {
               className="rounded-xl"
             />
           </label>
+          {allowedCategories.length ? (
+            <label className="space-y-1 text-xs sm:col-span-2">
+              <span>Training category</span>
+              <select
+                className="h-10 w-full rounded-xl border bg-card px-3 text-sm"
+                value={form.categoryId}
+                onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+                required
+              >
+                <option value="">Select category</option>
+                {allowedCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {formError ? <p className="sm:col-span-2 text-xs text-danger">{formError}</p> : null}
           <div className="flex justify-end gap-2 sm:col-span-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>

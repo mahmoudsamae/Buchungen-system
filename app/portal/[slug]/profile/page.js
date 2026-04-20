@@ -246,6 +246,11 @@ export default function PortalProfilePage() {
                             </span>
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">{b.service}</p>
+                          {b.publicLessonNote ? (
+                            <p className="mt-2 text-xs text-foreground/85">
+                              <span className="font-medium">Lesson note:</span> {b.publicLessonNote}
+                            </p>
+                          ) : null}
                         </div>
                         <StatusBadge value={b.status} />
                       </div>
@@ -268,6 +273,22 @@ export default function PortalProfilePage() {
                 <p className="text-sm text-muted-foreground">{t("portal.profile.notesHint")}</p>
               </CardHeader>
               <CardContent className="space-y-3">
+                {profileData.lessonNotes?.length ? (
+                  profileData.lessonNotes.map((n) => (
+                    <div key={`lesson-${n.bookingId}`} className="rounded-xl border border-primary/20 bg-background/70 p-4">
+                      <p className="text-sm font-semibold">
+                        Lesson · {n.date} ·{" "}
+                        <span className="font-mono tabular-nums">
+                          {n.time}
+                          {n.endTime ? `–${n.endTime}` : ""}
+                        </span>
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">{n.service || "—"}</p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm text-foreground/90">{n.note}</p>
+                    </div>
+                  ))
+                ) : null}
+
                 {profileData.publicNotes?.length ? (
                   profileData.publicNotes.map((n) => (
                     <div key={n.id} className="rounded-xl border border-primary/20 bg-background/70 p-4">
@@ -293,7 +314,7 @@ export default function PortalProfilePage() {
                       </p>
                     </div>
                   ))
-                ) : (
+                ) : profileData.lessonNotes?.length ? null : (
                   <p className="rounded-xl border border-dashed border-border/70 bg-muted/5 px-4 py-8 text-center text-sm text-muted-foreground">
                     {t("portal.profile.empty.notes")}
                   </p>

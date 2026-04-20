@@ -13,8 +13,11 @@ import { assertTeacherCapability, loadTeacherEffectivePermissions } from "@/lib/
 import { isBookingStatus, normalizeBookingStatus } from "@/lib/manager/booking-constants";
 import { normalizeBookingDate } from "@/lib/manager/booking-date-utils";
 
-function toUi(b, names, servicesById) {
+function toUi(b, names, servicesById, categoriesById, reportByBookingId) {
   const bookingDate = b.booking_date != null ? b.booking_date : b.date;
+  const serviceName = servicesById[b.service_id]?.name || null;
+  const categoryName = categoriesById[b.category_id]?.name || null;
+  const rep = reportByBookingId?.[b.id] || null;
   return {
     id: b.id,
     customer: names[b.customer_user_id] || "Student",
@@ -25,8 +28,13 @@ function toUi(b, names, servicesById) {
     status: normalizeBookingStatus(b.status) || String(b.status || ""),
     notes: b.notes || "",
     internalNote: b.internal_note != null ? String(b.internal_note) : "",
-    service: servicesById[b.service_id]?.name || "—",
+    service: serviceName || categoryName || "—",
     serviceId: b.service_id || null,
+    categoryId: b.category_id || null,
+    categoryName: categoryName || null,
+    lessonNote: rep?.notes || "",
+    lessonNextFocus: rep?.next_focus || "",
+    lessonCompletedAt: rep?.completed_at || null,
     bookingSource: b.booking_source || "legacy"
   };
 }
@@ -100,9 +108,24 @@ export async function GET(request) {
     ? await dataDb.from("services").select("id, name").in("id", serviceIds)
     : { data: [] };
   const servicesById = Object.fromEntries((services || []).map((s) => [s.id, s]));
+  const categoryIds = [...new Set((rows || []).map((r) => r.category_id).filter(Boolean))];
+  const { data: categories } = categoryIds.length
+    ? await dataDb.from("training_categories").select("id, name").in("id", categoryIds).eq("business_id", business.id)
+    : { data: [] };
+  const categoriesById = Object.fromEntries((categories || []).map((c) => [c.id, c]));
+
+  const bookingIds = [...new Set((rows || []).map((r) => r.id).filter(Boolean))];
+  const { data: reports } = bookingIds.length
+    ? await dataDb
+        .from("lesson_reports")
+        .select("booking_id, notes, next_focus, completed_at")
+        .eq("business_id", business.id)
+        .in("booking_id", bookingIds)
+    : { data: [] };
+  const reportByBookingId = Object.fromEntries((reports || []).map((r) => [r.booking_id, r]));
 
   return NextResponse.json({
-    bookings: (rows || []).map((b) => toUi(b, names, servicesById)),
+    bookings: (rows || []).map((b) => toUi(b, names, servicesById, categoriesById, reportByBookingId)),
     allowTeachersToRestoreCancelledBookings: Boolean(business.allow_teachers_to_restore_cancelled_bookings),
     canTeacherRestoreCancelledBookings
   });
@@ -236,6 +259,7 @@ export async function POST(request) {
       customer_user_id: customerUserId,
       created_by_user_id: user.id,
       service_id: serviceId || null,
+      category_id: mem?.category_id || null,
       booking_date: bookingDateYmd,
       start_time: `${start_time}:00`,
       end_time: `${end}:00`,
@@ -259,9 +283,19 @@ export async function POST(request) {
 
   const { data: p } = await admin.from("profiles").select("full_name").eq("id", customerUserId).maybeSingle();
   const servicesById = {};
+  const categoriesById = {};
   if (row?.service_id) {
     const { data: svc } = await admin.from("services").select("id, name").eq("id", row.service_id).maybeSingle();
     if (svc) servicesById[svc.id] = svc;
   }
-  return NextResponse.json({ booking: toUi(row, { [customerUserId]: p?.full_name }, servicesById) });
+  if (row?.category_id) {
+    const { data: cat } = await admin
+      .from("training_categories")
+      .select("id, name")
+      .eq("id", row.category_id)
+      .eq("business_id", business.id)
+      .maybeSingle();
+    if (cat) categoriesById[cat.id] = cat;
+  }
+  return NextResponse.json({ booking: toUi(row, { [customerUserId]: p?.full_name }, servicesById, categoriesById) });
 }

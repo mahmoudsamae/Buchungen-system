@@ -216,6 +216,17 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
   }, [data?.bookings]);
 
   const m = data?.metrics;
+  const assignedServicesCount = data?.assignedServiceIds?.length || 0;
+  const assignedCategoryNames = useMemo(() => {
+    const ids = new Set((data?.assignedServiceIds || []).map(String));
+    const names = new Set();
+    for (const s of data?.servicesCatalog || []) {
+      if (!ids.has(String(s.id))) continue;
+      const n = String(s.category_name || "").trim();
+      if (n) names.add(n);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [data?.assignedServiceIds, data?.servicesCatalog]);
 
   return (
     <>
@@ -316,67 +327,94 @@ export function SchoolTeacherProfileView({ slug, userId, businessName, data, err
             </div>
 
             {tab === "profile" ? (
-              <Card className="rounded-2xl border-border/60 shadow-soft">
-                <CardHeader>
-                  <CardTitle className="text-base">Teacher account details</CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    Core account fields for this teacher. Permissions and policy stay in the Management tab.
-                  </p>
-                </CardHeader>
-                <CardContent className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1 text-xs">
-                    <span className="text-muted-foreground">Full name</span>
-                    <Input
-                      value={core.fullName}
-                      onChange={(e) => setCore((prev) => ({ ...prev, fullName: e.target.value }))}
-                      className="rounded-xl"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs">
-                    <span className="text-muted-foreground">Email</span>
-                    <Input
-                      type="email"
-                      value={core.email}
-                      onChange={(e) => setCore((prev) => ({ ...prev, email: e.target.value }))}
-                      className="rounded-xl"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs">
-                    <span className="text-muted-foreground">Phone</span>
-                    <Input
-                      value={core.phone}
-                      onChange={(e) => setCore((prev) => ({ ...prev, phone: e.target.value }))}
-                      className="rounded-xl"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs">
-                    <span className="text-muted-foreground">Title / specialization</span>
-                    <Input
-                      value={core.title}
-                      onChange={(e) => setCore((prev) => ({ ...prev, title: e.target.value }))}
-                      className="rounded-xl"
-                      placeholder="e.g. Senior instructor"
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs sm:col-span-2">
-                    <span className="text-muted-foreground">Account status</span>
-                    <Select
-                      value={core.status}
-                      onChange={(e) => setCore((prev) => ({ ...prev, status: e.target.value }))}
-                      className="rounded-xl"
-                    >
-                      <option value="active">active</option>
-                      <option value="inactive">inactive</option>
-                      <option value="suspended">suspended</option>
-                    </Select>
-                  </label>
-                  <div className="sm:col-span-2 flex justify-end">
-                    <Button type="button" className="rounded-xl" disabled={coreSaving} onClick={saveCore}>
-                      {coreSaving ? "Saving..." : "Save core profile"}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="space-y-4">
+                <Card className="rounded-2xl border-border/60 shadow-soft">
+                  <CardHeader>
+                    <CardTitle className="text-base">Teacher account details</CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                      Core account fields for this teacher. Permissions and policy stay in the Management tab.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1 text-xs">
+                      <span className="text-muted-foreground">Full name</span>
+                      <Input
+                        value={core.fullName}
+                        onChange={(e) => setCore((prev) => ({ ...prev, fullName: e.target.value }))}
+                        className="rounded-xl"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span className="text-muted-foreground">Email</span>
+                      <Input
+                        type="email"
+                        value={core.email}
+                        onChange={(e) => setCore((prev) => ({ ...prev, email: e.target.value }))}
+                        className="rounded-xl"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span className="text-muted-foreground">Phone</span>
+                      <Input
+                        value={core.phone}
+                        onChange={(e) => setCore((prev) => ({ ...prev, phone: e.target.value }))}
+                        className="rounded-xl"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span className="text-muted-foreground">Title / specialization</span>
+                      <Input
+                        value={core.title}
+                        onChange={(e) => setCore((prev) => ({ ...prev, title: e.target.value }))}
+                        className="rounded-xl"
+                        placeholder="e.g. Senior instructor"
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs sm:col-span-2">
+                      <span className="text-muted-foreground">Account status</span>
+                      <Select
+                        value={core.status}
+                        onChange={(e) => setCore((prev) => ({ ...prev, status: e.target.value }))}
+                        className="rounded-xl"
+                      >
+                        <option value="active">active</option>
+                        <option value="inactive">inactive</option>
+                        <option value="suspended">suspended</option>
+                      </Select>
+                    </label>
+                    <div className="sm:col-span-2 flex justify-end">
+                      <Button type="button" className="rounded-xl" disabled={coreSaving} onClick={saveCore}>
+                        {coreSaving ? "Saving..." : "Save core profile"}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="rounded-2xl border-border/60 shadow-soft">
+                  <CardHeader>
+                    <CardTitle className="text-base">Allowed services & categories</CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                      School-side source of truth for what this teacher may teach.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    <p className="text-muted-foreground">
+                      Assigned services: <span className="font-medium text-foreground">{assignedServicesCount}</span>
+                    </p>
+                    <p className="text-muted-foreground">
+                      Allowed categories:{" "}
+                      <span className="font-medium text-foreground">
+                        {assignedCategoryNames.length ? assignedCategoryNames.join(", ") : "None assigned yet"}
+                      </span>
+                    </p>
+                    <div className="flex justify-end">
+                      <Button type="button" variant="outline" className="rounded-xl" onClick={() => setTab("services")}>
+                        Manage teacher services
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
             ) : null}
 
             {tab === "management" ? (

@@ -22,6 +22,8 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [migration, setMigration] = useState("");
+  const [allowedCategories, setAllowedCategories] = useState([]);
+  const [smartCategoryId, setSmartCategoryId] = useState("");
 
   const [smartOpen, setSmartOpen] = useState(false);
   const [smartDay, setSmartDay] = useState(1);
@@ -33,12 +35,22 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
   const [customEnd, setCustomEnd] = useState("12:00");
   const [customValidFrom, setCustomValidFrom] = useState("");
   const [customValidUntil, setCustomValidUntil] = useState("");
+  const [customCategoryId, setCustomCategoryId] = useState("");
 
   const [ovDate, setOvDate] = useState("");
   const [ovClosed, setOvClosed] = useState(true);
   const [ovStart, setOvStart] = useState("10:00");
   const [ovEnd, setOvEnd] = useState("14:00");
   const [ovNote, setOvNote] = useState("");
+  const [ovCategoryId, setOvCategoryId] = useState("");
+
+  const refetchTeacherServices = useCallback(async () => {
+    const res = await teacherFetch(schoolSlug, "/api/teacher/services");
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setAllowedCategories(Array.isArray(j.categories) ? j.categories : []);
+    }
+  }, [schoolSlug]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,14 +83,24 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
     } else if (oRes.status === 503) {
       setOverrides([]);
     }
+    await refetchTeacherServices();
     setLoading(false);
-  }, [schoolSlug, t]);
+  }, [schoolSlug, t, refetchTeacherServices]);
 
   useEffect(() => {
     const t0 = new Date();
     setOvDate(t0.toISOString().slice(0, 10));
     load();
   }, [load]);
+
+  useEffect(() => {
+    refetchTeacherServices();
+  }, [refetchTeacherServices]);
+
+  const categoryLabel = useMemo(() => {
+    const m = new Map((allowedCategories || []).map((c) => [String(c.id), c.name || "Category"]));
+    return (id) => (id ? m.get(String(id)) || "Category" : "General");
+  }, [allowedCategories]);
 
   const rulesByDay = useMemo(() => {
     const m = {};
@@ -131,6 +153,7 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
   };
 
   const addCustomRange = async () => {
+    console.log("[teacher availability] Selected category:", customCategoryId || null);
     const res = await teacherFetch(schoolSlug, "/api/teacher/availability/rules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -139,7 +162,8 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
         start_time: customStart,
         end_time: customEnd,
         valid_from: customValidFrom || undefined,
-        valid_until: customValidUntil || undefined
+        valid_until: customValidUntil || undefined,
+        categoryId: customCategoryId || null
       })
     });
     const json = await res.json().catch(() => ({}));
@@ -153,6 +177,7 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
 
   const saveEditRule = async () => {
     if (!editRule) return;
+    console.log("[teacher availability] Selected category:", editRule.category_id || null);
     const vf =
       editRule.valid_from != null && String(editRule.valid_from).trim()
         ? String(editRule.valid_from).slice(0, 10)
@@ -168,7 +193,8 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
         start_time: editRule.start_time,
         end_time: editRule.end_time,
         valid_from: vf,
-        valid_until: vu
+        valid_until: vu,
+        categoryId: editRule.category_id || null
       })
     });
     const json = await res.json().catch(() => ({}));
@@ -186,8 +212,15 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
         ovClosed
-          ? { date: ovDate, is_closed: true, note: ovNote || undefined }
-          : { date: ovDate, is_closed: false, start_time: ovStart, end_time: ovEnd, note: ovNote || undefined }
+          ? { date: ovDate, is_closed: true, note: ovNote || undefined, categoryId: ovCategoryId || null }
+          : {
+              date: ovDate,
+              is_closed: false,
+              start_time: ovStart,
+              end_time: ovEnd,
+              note: ovNote || undefined,
+              categoryId: ovCategoryId || null
+            }
       )
     });
     const json = await res.json().catch(() => ({}));
@@ -247,6 +280,11 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
           </Button>
         </div>
       </div>
+      {allowedCategories.length === 0 ? (
+        <div className="rounded-xl border border-border/60 bg-zinc-950/30 px-3 py-2 text-xs text-muted-foreground">
+          No services assigned yet. Ask your school to assign at least one service category.
+        </div>
+      ) : null}
 
       {migration ? (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">{migration}</div>
@@ -260,6 +298,9 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
         initialWeekday={smartDay}
         title={t("teacher.availability.smartGeneratorTitle")}
         onSaved={load}
+        categoryId={smartCategoryId}
+        onCategoryIdChange={setSmartCategoryId}
+        categories={allowedCategories}
       />
 
       <ManagerDialog open={customOpen} onClose={() => setCustomOpen(false)} title={t("teacher.availability.addCustomRange")}>
@@ -274,6 +315,21 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
               ))}
             </Select>
           </label>
+          {allowedCategories.length ? (
+            <label className="space-y-1 text-xs">
+              Category
+              <Select value={customCategoryId} onChange={(e) => setCustomCategoryId(e.target.value)}>
+                <option value="">Select category</option>
+                {allowedCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          ) : (
+            <div />
+          )}
           <div />
           <label className="space-y-1 text-xs">
             {t("teacher.availability.start")}
@@ -342,6 +398,22 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
                   className="rounded-xl"
                 />
               </label>
+              {allowedCategories.length ? (
+                <label className="space-y-1 text-xs md:col-span-2">
+                  Category
+                  <Select
+                    value={editRule.category_id || ""}
+                    onChange={(e) => setEditRule((r) => ({ ...r, category_id: e.target.value || null }))}
+                  >
+                    <option value="">Select category</option>
+                    {allowedCategories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+              ) : null}
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <Button type="button" variant="outline" className="rounded-xl" onClick={() => setEditRule(null)}>
@@ -411,6 +483,7 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
                               <span className="font-mono text-xs">
                                 {String(r.start_time).slice(0, 5)}–{String(r.end_time).slice(0, 5)}
                               </span>
+                              <span className="ml-2 text-[11px] text-muted-foreground">{categoryLabel(r.category_id)}</span>
                               {fmtValidity(r) ? (
                                 <span className="ml-2 text-[11px] text-muted-foreground">({fmtValidity(r)})</span>
                               ) : null}
@@ -431,7 +504,8 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
                                   setEditRule({
                                     ...r,
                                     start_time: String(r.start_time).slice(0, 5),
-                                    end_time: String(r.end_time).slice(0, 5)
+                                    end_time: String(r.end_time).slice(0, 5),
+                                    category_id: r.category_id || null
                                   })
                                 }
                                 aria-label="Edit"
@@ -473,6 +547,21 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
                     <input type="checkbox" checked={ovClosed} onChange={(e) => setOvClosed(e.target.checked)} />
                     {t("teacher.availability.dayOff")}
                   </label>
+                  {allowedCategories.length ? (
+                    <label className="space-y-1 text-xs">
+                      Category
+                      <Select value={ovCategoryId} onChange={(e) => setOvCategoryId(e.target.value)}>
+                        <option value="">Select category</option>
+                        {allowedCategories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </label>
+                  ) : (
+                    <div />
+                  )}
                   {!ovClosed ? (
                     <>
                       <label className="space-y-1 text-xs">
@@ -509,6 +598,7 @@ export function TeacherAvailabilityClient({ schoolSlug }) {
                       <span className="text-muted-foreground">
                         {o.is_closed ? t("teacher.availability.dayOff") : `${String(o.start_time).slice(0, 5)}–${String(o.end_time).slice(0, 5)}`}
                       </span>
+                      <span className="text-[11px] text-muted-foreground">{categoryLabel(o.category_id)}</span>
                       {o.note ? <span className="w-full text-xs text-muted-foreground md:w-auto">{o.note}</span> : null}
                       <button type="button" className="text-danger hover:underline" onClick={() => deleteOverride(o.id)}>
                         {t("teacher.availability.remove")}

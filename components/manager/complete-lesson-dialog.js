@@ -26,7 +26,7 @@ export function CompleteLessonDialog({ open, booking, onClose, onSubmit }) {
     const d = String(now.getDate()).padStart(2, "0");
     const h = String(now.getHours()).padStart(2, "0");
     const mm = String(now.getMinutes()).padStart(2, "0");
-    setForm({ notes: "", topics: "", nextFocus: "", completedAt: `${y}-${m}-${d}T${h}:${mm}`, visibleToStudent: false });
+    setForm({ notes: "", topics: "", nextFocus: "", completedAt: `${y}-${m}-${d}T${h}:${mm}`, visibleToStudent: true });
     setError("");
     setSaving(false);
   }, [open, booking?.id]);

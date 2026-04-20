@@ -11,7 +11,17 @@ import { cn } from "@/lib/utils";
 
 const WEEKDAY_LABEL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-export function TeacherSmartSlotModal({ open, onClose, schoolSlug, initialWeekday = 1, title, onSaved }) {
+export function TeacherSmartSlotModal({
+  open,
+  onClose,
+  schoolSlug,
+  initialWeekday = 1,
+  title,
+  onSaved,
+  categories = [],
+  categoryId = "",
+  onCategoryIdChange
+}) {
   const [weekday, setWeekday] = useState(initialWeekday);
   const [dayStart, setDayStart] = useState("09:00");
   const [dayEnd, setDayEnd] = useState("15:00");
@@ -53,7 +63,8 @@ export function TeacherSmartSlotModal({ open, onClose, schoolSlug, initialWeekda
           valid_from: validFrom || null,
           valid_until: validUntil || null,
           repeat_weekly: true,
-          replace_weekday: replaceWeekday
+          replace_weekday: replaceWeekday,
+          categoryId: categoryId || null
         })
       });
       const json = await res.json().catch(() => ({}));
@@ -81,6 +92,21 @@ export function TeacherSmartSlotModal({ open, onClose, schoolSlug, initialWeekda
             ))}
           </Select>
         </label>
+        {categories.length ? (
+          <label className="space-y-1 text-xs">
+            Category
+            <Select value={categoryId || ""} onChange={(e) => onCategoryIdChange?.(e.target.value)}>
+              <option value="">Select category</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </label>
+        ) : (
+          <div />
+        )}
         <label className="flex items-center gap-2 pt-6 text-sm">
           <input type="checkbox" checked={replaceWeekday} onChange={(e) => setReplaceWeekday(e.target.checked)} />
           Replace existing windows for this weekday

@@ -214,6 +214,7 @@ export async function POST(request) {
       customer_user_id: customerUserId,
       created_by_user_id: user.id,
       service_id: serviceId,
+      category_id: mem?.category_id || null,
       booking_date: bookingDateYmd,
       start_time: `${start_time}:00`,
       end_time: `${end}:00`,

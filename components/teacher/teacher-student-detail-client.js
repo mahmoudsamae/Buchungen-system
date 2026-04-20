@@ -35,6 +35,7 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
   const [error, setError] = useState("");
   const [form, setForm] = useState({ fullName: "", phone: "", email: "" });
   const [status, setStatus] = useState("active");
+  const [categoryId, setCategoryId] = useState("");
   const [internalNote, setInternalNote] = useState("");
   const [saving, setSaving] = useState(false);
   const [bookingOpen, setBookingOpen] = useState(false);
@@ -55,6 +56,7 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
       const p = json.profile || {};
       setForm({ fullName: p.full_name || "", phone: p.phone || "", email: p.email || "" });
       setStatus(json.membership?.status || "active");
+      setCategoryId(json.membership?.category_id || "");
       setInternalNote(json.membership?.internal_note || "");
     }
     setLoading(false);
@@ -98,11 +100,17 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
         email: form.email.trim(),
         phone: form.phone.trim(),
         status,
+        categoryId: categoryId || null,
         internalNote
       })
     });
+    const json = await res.json().catch(() => ({}));
     setSaving(false);
-    if (res.ok) await load();
+    if (!res.ok) {
+      toast.error(json.error || "Could not save student changes.");
+      return;
+    }
+    await load();
   };
 
   const sendRecovery = async () => {
@@ -151,6 +159,11 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
               {data.instructorName ? (
                 <p className="mt-2 text-sm text-foreground/80">
                   Primary instructor: <span className="font-medium">{data.instructorName}</span>
+                </p>
+              ) : null}
+              {data.assignedCategoryName ? (
+                <p className="mt-1 text-sm text-foreground/80">
+                  Training category: <span className="font-medium">{data.assignedCategoryName}</span>
                 </p>
               ) : null}
             </div>
@@ -257,6 +270,27 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
                       <option value="suspended">suspended</option>
                     </select>
                   </label>
+                  {Array.isArray(data.availableCategories) && data.availableCategories.length ? (
+                    <label className="block space-y-1">
+                      <span className="text-xs text-muted-foreground">Training category</span>
+                      <select
+                        className="h-10 w-full rounded-xl border bg-card px-3 text-sm"
+                        value={categoryId}
+                        onChange={(e) => setCategoryId(e.target.value)}
+                      >
+                        <option value="">Select category</option>
+                        {data.availableCategories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      No services assigned to you yet. Ask your school to assign service categories first.
+                    </p>
+                  )}
                   <label className="block space-y-1">
                     <span className="text-xs text-muted-foreground">{t("teacher.student.internalNote")}</span>
                     <textarea
@@ -307,6 +341,8 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
                   <thead>
                     <tr className="border-b border-border/50 text-left text-xs uppercase text-muted-foreground">
                       <th className="pb-2">When</th>
+                      <th className="pb-2">Service</th>
+                      <th className="pb-2">Lesson note</th>
                       <th className="pb-2">Status</th>
                       <th className="pb-2">Source</th>
                     </tr>
@@ -316,6 +352,10 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
                       <tr key={b.id} className="border-b border-border/30">
                         <td className="py-2 font-mono">
                           {b.date} · {b.time}–{b.endTime}
+                        </td>
+                        <td className="py-2">{b.service || "—"}</td>
+                        <td className="py-2 text-xs text-muted-foreground">
+                          {b.lessonNote ? String(b.lessonNote).slice(0, 120) : "—"}
                         </td>
                         <td className="py-2">
                           <StatusBadge value={b.status} />
@@ -348,6 +388,7 @@ export function TeacherStudentDetailClient({ schoolSlug, studentId }) {
                           <p className="font-mono text-sm">
                             {b.date} · {b.time}
                           </p>
+                          <p className="text-xs text-muted-foreground">Service: {b.service || "—"}</p>
                           <p className="text-xs text-muted-foreground">Source: {b.bookingSource || "—"}</p>
                         </div>
                         <div className="flex gap-2">

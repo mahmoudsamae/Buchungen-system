@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
 import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 import { timeToMinutes, timesOverlapHalfOpenMinutes } from "@/lib/manager/booking-time";
+import { getTeacherAllowedCategories } from "@/lib/manager/teacher-category-policy";
 
 function overlap(aStart, aEnd, bStart, bEnd) {
   const as = timeToMinutes(aStart);
@@ -38,6 +41,11 @@ export async function POST(request) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
+  let readDb = supabase;
+  try {
+    readDb = createAdminClient();
+  } catch {}
+  const allowedCategories = await getTeacherAllowedCategories(readDb, business.id, user.id);
 
   const cap = await assertTeacherCapability(business.id, user.id, "can_manage_own_availability");
   if (!cap.ok) return NextResponse.json({ error: cap.message }, { status: cap.status });
@@ -52,6 +60,7 @@ export async function POST(request) {
   const weekday = Number(body.weekday);
   const start_time = String(body.start_time || "").slice(0, 5);
   const end_time = String(body.end_time || "").slice(0, 5);
+  const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
 
   if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6 || !start_time || !end_time) {
     return NextResponse.json({ error: "weekday 0–6, start_time, end_time required." }, { status: 400 });
@@ -59,6 +68,28 @@ export async function POST(request) {
 
   if (timeToMinutes(start_time) >= timeToMinutes(end_time)) {
     return NextResponse.json({ error: "start_time must be before end_time." }, { status: 400 });
+  }
+
+  if (categoryId !== undefined && categoryId !== null) {
+    console.log("[teacher/rules POST] Saving slot category:", categoryId);
+    console.log(
+      "[teacher/rules POST] Teacher allowed categories:",
+      allowedCategories.mode,
+      allowedCategories.mode === "restricted" ? [...allowedCategories.categoryIds] : [],
+      "assigned services:",
+      allowedCategories.assignedServiceIds || [],
+      "derived category ids:",
+      allowedCategories.derivedCategoryIds || []
+    );
+    if (allowedCategories.mode === "restricted" && !allowedCategories.categoryIds.has(String(categoryId))) {
+      return NextResponse.json({ error: "You can only create slots for your assigned categories." }, { status: 400 });
+    }
+    const { category, error: cErr } = await findCategoryForBusiness(readDb, business.id, categoryId);
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+    if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+  }
+  if (allowedCategories.mode === "restricted" && allowedCategories.categoryIds.size > 0 && categoryId == null) {
+    return NextResponse.json({ error: "Please select a category for this availability slot." }, { status: 400 });
   }
 
   const valid_from = body.valid_from != null && body.valid_from !== "" ? String(body.valid_from).slice(0, 10) : null;
@@ -73,7 +104,8 @@ export async function POST(request) {
     .eq("business_id", business.id)
     .eq("staff_user_id", user.id)
     .eq("weekday", weekday)
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .is("category_id", categoryId === undefined ? null : categoryId);
 
   const hasOverlap = (existing || []).some((r) =>
     overlap(start_time, end_time, String(r.start_time).slice(0, 5), String(r.end_time).slice(0, 5))
@@ -94,6 +126,7 @@ export async function POST(request) {
   };
   if (body.slot_duration_minutes != null) insert.slot_duration_minutes = Number(body.slot_duration_minutes) || null;
   if (body.buffer_minutes != null) insert.buffer_minutes = Number(body.buffer_minutes) || null;
+  insert.category_id = categoryId === undefined ? null : categoryId;
 
   const { data: row, error } = await supabase.from("teacher_availability_rules").insert(insert).select().single();
 

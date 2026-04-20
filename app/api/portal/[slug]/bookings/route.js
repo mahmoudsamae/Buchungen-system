@@ -147,6 +147,7 @@ export async function POST(request, { params }) {
       business_id: biz.id,
       customer_user_id: user.id,
       created_by_user_id: user.id,
+      category_id: mem.category_id || null,
       booking_date: bookingDateYmd,
       start_time: `${start_time}:00`,
       end_time: `${end}:00`,

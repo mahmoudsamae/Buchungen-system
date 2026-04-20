@@ -24,9 +24,6 @@ function normalizeBookingRow(row, serviceName) {
     endTime: String(row.end_time || "").slice(0, 5),
     status: row.status,
     notes: row.notes || "",
-    lessonNote: row.lesson_note || "",
-    lessonNextFocus: row.lesson_next_focus || "",
-    completedAt: row.completed_at || null,
     publicLessonNote: row.notes || "",
     service: serviceName || "—"
   };
@@ -126,25 +123,6 @@ export async function GET(request, { params }) {
     : { data: [] };
   const serviceById = Object.fromEntries((svcs || []).map((s) => [s.id, s.name]));
 
-  const bookingIds = [...new Set((bookingRows || []).map((b) => b.id).filter(Boolean))];
-  const { data: reports } = bookingIds.length
-    ? await supabase
-        .from("lesson_reports")
-        .select("booking_id, notes, next_focus, completed_at")
-        .eq("business_id", biz.id)
-        .in("booking_id", bookingIds)
-    : { data: [] };
-  const reportByBookingId = Object.fromEntries(
-    (reports || []).map((r) => [
-      r.booking_id,
-      {
-        lesson_note: r.notes || "",
-        lesson_next_focus: r.next_focus || "",
-        completed_at: r.completed_at || null
-      }
-    ])
-  );
-
   const now = new Date();
 
   const overlap = new Set(BOOKING_OVERLAP_STATUSES);
@@ -153,7 +131,7 @@ export async function GET(request, { params }) {
   const past = [];
 
   for (const row of bookingRows || []) {
-    const b = normalizeBookingRow({ ...row, ...(reportByBookingId[row.id] || {}) }, serviceById[row.service_id]);
+    const b = normalizeBookingRow(row, serviceById[row.service_id]);
     const endUtc = lessonEndUtc(b.date, b.time, b.endTime, tz);
     const activeBlock = overlap.has(b.status);
     const isPastTime = endUtc < now;
@@ -163,6 +141,18 @@ export async function GET(request, { params }) {
 
   upcoming.sort((a, b) => String(a.date + a.time).localeCompare(String(b.date + b.time)));
   past.sort((a, b) => String(b.date + b.time).localeCompare(String(a.date + a.time)));
+
+  const lessonNotes = past
+    .filter((b) => b.status === "completed" && String(b.publicLessonNote || "").trim() !== "")
+    .slice(0, 80)
+    .map((b) => ({
+      bookingId: b.id,
+      date: b.date,
+      time: b.time,
+      endTime: b.endTime || "",
+      service: b.service || "—",
+      note: String(b.publicLessonNote || "").trim()
+    }));
 
   const publicNotes = sortStudentNotesByPinnedThenDate(noteRows);
   const lastBooking =
@@ -197,6 +187,7 @@ export async function GET(request, { params }) {
     },
     upcomingBookings: upcoming.slice(0, 50),
     pastBookings: past.slice(0, 50),
+    lessonNotes,
     publicNotes
   });
 }

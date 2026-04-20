@@ -4,6 +4,7 @@ import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 import { listTeacherStudentsForTable } from "@/lib/data/teacher-workspace";
+import { getTeacherAllowedCategories } from "@/lib/manager/teacher-category-policy";
 
 export async function GET(request) {
   const g = await guardStaffJson(request);
@@ -42,11 +43,18 @@ export async function POST(request) {
   const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
 
   const admin = createAdminClient();
+  const allowedCategories = await getTeacherAllowedCategories(admin, business.id, user.id);
 
   if (categoryId !== undefined && categoryId !== null) {
+    if (allowedCategories.mode === "restricted" && !allowedCategories.categoryIds.has(String(categoryId))) {
+      return NextResponse.json({ error: "You can only assign categories that are enabled for your services." }, { status: 400 });
+    }
     const { category, error: cErr } = await findCategoryForBusiness(admin, business.id, categoryId);
     if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
     if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+  }
+  if (allowedCategories.mode === "restricted" && allowedCategories.categoryIds.size > 0 && categoryId == null) {
+    return NextResponse.json({ error: "Please select a training category for this student." }, { status: 400 });
   }
 
   if (!email || !fullName || password.length < 8) {

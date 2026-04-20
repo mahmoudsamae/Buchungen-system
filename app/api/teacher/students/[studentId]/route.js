@@ -7,11 +7,13 @@ import { normalizeBookingStatus } from "@/lib/manager/booking-constants";
 import { normalizeBookingDate } from "@/lib/manager/booking-date-utils";
 import { normalizeStudentIdParam } from "@/lib/manager/student-route-params";
 import { ensureStudentAccessToken } from "@/lib/student-access/student-access-tokens";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
+import { getTeacherAllowedCategories } from "@/lib/manager/teacher-category-policy";
 
 export async function GET(request, { params }) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
-  const { business, user, supabase } = g.ctx;
+  const { business, user } = g.ctx;
   const idNorm = normalizeStudentIdParam((await params).studentId);
   if (!idNorm.ok) return NextResponse.json({ error: idNorm.error }, { status: 400 });
   const studentId = idNorm.studentId;
@@ -19,8 +21,9 @@ export async function GET(request, { params }) {
   const admin = createAdminClient();
   const ok = await assertTeacherOwnsStudent(admin, business.id, user.id, studentId);
   if (!ok) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const allowedCategories = await getTeacherAllowedCategories(admin, business.id, user.id);
 
-  const { data: membership } = await supabase
+  const { data: membership } = await admin
     .from("business_users")
     .select("user_id, status, internal_note, category_id, created_at, primary_instructor_user_id")
     .eq("business_id", business.id)
@@ -38,7 +41,7 @@ export async function GET(request, { params }) {
 
   const { data: bookings } = await admin
     .from("bookings")
-    .select("id, booking_date, start_time, end_time, status, service_id, notes, internal_note, booking_source")
+    .select("id, booking_date, start_time, end_time, status, service_id, category_id, notes, internal_note, booking_source")
     .eq("business_id", business.id)
     .eq("customer_user_id", studentId)
     .order("booking_date", { ascending: false });
@@ -62,6 +65,26 @@ export async function GET(request, { params }) {
   }));
 
   const rows = bookings || [];
+  const bookingServiceIds = [...new Set(rows.map((b) => b.service_id).filter(Boolean))];
+  const bookingCategoryIds = [...new Set(rows.map((b) => b.category_id).filter(Boolean))];
+  const { data: bookingServices } = bookingServiceIds.length
+    ? await admin.from("services").select("id, name").in("id", bookingServiceIds)
+    : { data: [] };
+  const { data: bookingCategories } = bookingCategoryIds.length
+    ? await admin.from("training_categories").select("id, name").in("id", bookingCategoryIds).eq("business_id", business.id)
+    : { data: [] };
+  const serviceById = Object.fromEntries((bookingServices || []).map((s) => [s.id, s.name || ""]));
+  const categoryById = Object.fromEntries((bookingCategories || []).map((c) => [c.id, c.name || ""]));
+  const bookingIds = [...new Set(rows.map((b) => b.id).filter(Boolean))];
+  const { data: reports } = bookingIds.length
+    ? await admin
+        .from("lesson_reports")
+        .select("booking_id, notes, next_focus, completed_at")
+        .eq("business_id", business.id)
+        .in("booking_id", bookingIds)
+    : { data: [] };
+  const reportByBookingId = Object.fromEntries((reports || []).map((r) => [r.booking_id, r]));
+
   const now = new Date();
   const activeLike = new Set(["pending", "confirmed"]);
 
@@ -101,6 +124,17 @@ export async function GET(request, { params }) {
         category_id: null,
         created_at: null
       };
+
+  let assignedCategoryName = null;
+  if (membershipOut?.category_id) {
+    const { data: assignedCategory } = await admin
+      .from("training_categories")
+      .select("id, name")
+      .eq("id", membershipOut.category_id)
+      .eq("business_id", business.id)
+      .maybeSingle();
+    assignedCategoryName = assignedCategory?.name || null;
+  }
 
   const completedCount = rows.filter((b) => normalizeBookingStatus(b.status) === "completed").length;
   const pendingApprovalCount = rows.filter((b) => {
@@ -146,7 +180,7 @@ export async function GET(request, { params }) {
 
   return NextResponse.json({
     schoolSlug: business.slug,
-    membership,
+    membership: membershipOut,
     profile,
     instructorName,
     stats: {
@@ -173,10 +207,18 @@ export async function GET(request, { params }) {
       status: normalizeBookingStatus(b.status) || b.status,
       bookingSource: b.booking_source || "legacy",
       notes: b.notes || "",
-      internalNote: b.internal_note || ""
+      internalNote: b.internal_note || "",
+      serviceId: b.service_id || null,
+      categoryId: b.category_id || null,
+      service: serviceById[b.service_id] || categoryById[b.category_id] || "—",
+      lessonNote: reportByBookingId[b.id]?.notes || "",
+      lessonNextFocus: reportByBookingId[b.id]?.next_focus || "",
+      lessonCompletedAt: reportByBookingId[b.id]?.completed_at || null
     })),
     upcoming: upcomingNormalized,
-    notes
+    notes,
+    availableCategories: allowedCategories.categories || [],
+    assignedCategoryName
   });
 }
 
@@ -191,6 +233,7 @@ export async function PATCH(request, { params }) {
   const admin = createAdminClient();
   const ok = await assertTeacherOwnsStudent(admin, business.id, user.id, studentId);
   if (!ok) return NextResponse.json({ error: "Not found." }, { status: 404 });
+  const allowedCategories = await getTeacherAllowedCategories(admin, business.id, user.id);
 
   let body;
   try {
@@ -273,6 +316,28 @@ export async function PATCH(request, { params }) {
     const { error } = await admin
       .from("business_users")
       .update({ internal_note })
+      .eq("business_id", business.id)
+      .eq("user_id", studentId)
+      .eq("role", "customer");
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  }
+
+  if (body.categoryId !== undefined || body.category_id !== undefined) {
+    const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
+    if (categoryId !== null) {
+      if (allowedCategories.mode === "restricted" && !allowedCategories.categoryIds.has(String(categoryId))) {
+        return NextResponse.json({ error: "You can only assign categories that are enabled for your services." }, { status: 400 });
+      }
+      const { category, error: cErr } = await findCategoryForBusiness(admin, business.id, categoryId);
+      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+      if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+    }
+    if (allowedCategories.mode === "restricted" && allowedCategories.categoryIds.size > 0 && categoryId == null) {
+      return NextResponse.json({ error: "Please select a training category for this student." }, { status: 400 });
+    }
+    const { error } = await admin
+      .from("business_users")
+      .update({ category_id: categoryId })
       .eq("business_id", business.id)
       .eq("user_id", studentId)
       .eq("role", "customer");

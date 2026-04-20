@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
 import { assertTeacherCapability } from "@/lib/auth/teacher-capabilities";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 import { timeToMinutes, timesOverlapHalfOpenMinutes } from "@/lib/manager/booking-time";
+import { getTeacherAllowedCategories } from "@/lib/manager/teacher-category-policy";
 
 function overlap(aStart, aEnd, bStart, bEnd) {
   const as = timeToMinutes(aStart);
@@ -16,6 +19,11 @@ export async function PATCH(request, { params }) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
+  let readDb = supabase;
+  try {
+    readDb = createAdminClient();
+  } catch {}
+  const allowedCategories = await getTeacherAllowedCategories(readDb, business.id, user.id);
   const { id } = await params;
 
   const cap = await assertTeacherCapability(business.id, user.id, "can_manage_own_availability");
@@ -30,7 +38,7 @@ export async function PATCH(request, { params }) {
 
   const { data: current } = await supabase
     .from("teacher_availability_rules")
-    .select("id, weekday, start_time, end_time, is_active")
+    .select("id, weekday, start_time, end_time, is_active, category_id")
     .eq("id", id)
     .eq("business_id", business.id)
     .eq("staff_user_id", user.id)
@@ -51,6 +59,31 @@ export async function PATCH(request, { params }) {
     }
     patch.weekday = w;
   }
+  if (body.categoryId !== undefined || body.category_id !== undefined) {
+    const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
+    console.log("[teacher/rules PATCH] Saving slot category:", categoryId);
+    console.log(
+      "[teacher/rules PATCH] Teacher allowed categories:",
+      allowedCategories.mode,
+      allowedCategories.mode === "restricted" ? [...allowedCategories.categoryIds] : [],
+      "assigned services:",
+      allowedCategories.assignedServiceIds || [],
+      "derived category ids:",
+      allowedCategories.derivedCategoryIds || []
+    );
+    if (categoryId !== null) {
+      if (allowedCategories.mode === "restricted" && !allowedCategories.categoryIds.has(String(categoryId))) {
+        return NextResponse.json({ error: "You can only use your assigned categories." }, { status: 400 });
+      }
+      const { category, error: cErr } = await findCategoryForBusiness(readDb, business.id, categoryId);
+      if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+      if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+    }
+    if (allowedCategories.mode === "restricted" && allowedCategories.categoryIds.size > 0 && categoryId == null) {
+      return NextResponse.json({ error: "Please select a category for this availability slot." }, { status: 400 });
+    }
+    patch.category_id = categoryId;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
@@ -59,6 +92,7 @@ export async function PATCH(request, { params }) {
   const nextStart = patch.start_time ? String(patch.start_time).slice(0, 5) : String(current.start_time).slice(0, 5);
   const nextEnd = patch.end_time ? String(patch.end_time).slice(0, 5) : String(current.end_time).slice(0, 5);
   const nextWeekday = patch.weekday !== undefined ? patch.weekday : current.weekday;
+  const nextCategoryId = patch.category_id !== undefined ? patch.category_id : current.category_id;
 
   if (timeToMinutes(nextStart) >= timeToMinutes(nextEnd)) {
     return NextResponse.json({ error: "start_time must be before end_time." }, { status: 400 });
@@ -78,6 +112,7 @@ export async function PATCH(request, { params }) {
       .eq("staff_user_id", user.id)
       .eq("weekday", nextWeekday)
       .eq("is_active", true)
+      .is("category_id", nextCategoryId)
       .neq("id", id);
 
     const hasOverlap = (existing || []).some((r) =>

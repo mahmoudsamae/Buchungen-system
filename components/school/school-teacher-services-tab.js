@@ -22,6 +22,16 @@ export function SchoolTeacherServicesTab({ slug, userId, data, onSaved }) {
   }, [assigned]);
 
   const activeCatalog = useMemo(() => catalog.filter((s) => s.is_active), [catalog]);
+  const selectedCategoryNames = useMemo(() => {
+    const ids = new Set([...selected].map(String));
+    const names = new Set();
+    for (const s of activeCatalog) {
+      if (!ids.has(String(s.id))) continue;
+      const n = String(s.category_name || "").trim();
+      if (n) names.add(n);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [selected, activeCatalog]);
 
   const toggle = useCallback((id) => {
     setSelected((prev) => {
@@ -73,27 +83,35 @@ export function SchoolTeacherServicesTab({ slug, userId, data, onSaved }) {
           {activeCatalog.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("school.teacher.services.noActiveCatalog")}</p>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {activeCatalog.map((s) => {
-                const on = selected.has(String(s.id));
-                return (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => toggle(s.id)}
-                    className={cn(
-                      "rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition",
-                      on ? "border-primary/50 bg-primary/15 text-foreground" : "border-border/50 bg-muted/15 text-muted-foreground hover:bg-muted/30"
-                    )}
-                  >
-                    <span className="block font-semibold">{s.name}</span>
-                    {s.duration != null ? (
-                      <span className="text-[10px] text-muted-foreground">{s.duration} min</span>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              <div className="rounded-lg border border-border/40 bg-muted/10 px-3 py-2 text-xs">
+                <p className="font-semibold text-foreground">Allowed categories for this teacher</p>
+                <p className="mt-1 text-muted-foreground">
+                  {selectedCategoryNames.length ? selectedCategoryNames.join(", ") : "No category assigned yet"}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {activeCatalog.map((s) => {
+                  const on = selected.has(String(s.id));
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => toggle(s.id)}
+                      className={cn(
+                        "rounded-lg border px-2.5 py-1.5 text-left text-xs font-medium transition",
+                        on ? "border-primary/50 bg-primary/15 text-foreground" : "border-border/50 bg-muted/15 text-muted-foreground hover:bg-muted/30"
+                      )}
+                    >
+                      <span className="block font-semibold">{s.name}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {s.category_name || "General"}{s.duration != null ? ` · ${s.duration} min` : ""}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
           )}
 
           <div className="flex justify-end border-t border-border/40 pt-4">

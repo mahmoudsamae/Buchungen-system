@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { PageHeader } from "@/components/navigation/page-header";
 import { useLanguage } from "@/components/i18n/language-provider";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -26,7 +26,7 @@ import { CategoryCombobox } from "@/components/manager/category-combobox";
 import { buildDefaultNewServiceForm } from "@/lib/manager/default-new-service-form";
 
 export function SchoolServicesPageClient() {
-  const { business, services, categories, serviceActions, loadAll } = useManager();
+  const { business, services, categories, serviceActions, reload } = useManager();
   const { t } = useLanguage();
   const businessSlug = business?.slug ?? "";
 
@@ -40,6 +40,15 @@ export function SchoolServicesPageClient() {
   const [assignSaving, setAssignSaving] = useState(false);
   const [assignError, setAssignError] = useState("");
   const [serviceSubmitAttempted, setServiceSubmitAttempted] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [suggestions, setSuggestions] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [applyingTemplateId, setApplyingTemplateId] = useState("");
+  const [templateError, setTemplateError] = useState("");
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [suggestionQuery, setSuggestionQuery] = useState("");
+  const [suggestionCategory, setSuggestionCategory] = useState("all");
+  const [addedSuggestionIds, setAddedSuggestionIds] = useState(() => new Set());
 
   const categoryName = useMemo(() => {
     const m = new Map((categories || []).map((c) => [c.id, c.name]));
@@ -81,6 +90,30 @@ export function SchoolServicesPageClient() {
   useEffect(() => {
     loadTeam();
   }, [loadTeam]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!businessSlug) return;
+      setTemplatesLoading(true);
+      setTemplateError("");
+      const res = await managerFetch(businessSlug, "/api/manager/service-templates");
+      const j = await res.json().catch(() => ({}));
+      if (!active) return;
+      setTemplatesLoading(false);
+      if (!res.ok) {
+        setTemplateError(typeof j.error === "string" ? j.error : "Could not load templates.");
+        setTemplates([]);
+        setSuggestions([]);
+        return;
+      }
+      setTemplates(Array.isArray(j.templates) ? j.templates : []);
+      setSuggestions(Array.isArray(j.suggestions) ? j.suggestions : []);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [businessSlug]);
 
   const loadAssignmentForTeacher = useCallback(
     async (teacherId) => {
@@ -139,7 +172,62 @@ export function SchoolServicesPageClient() {
       setAssignError(typeof j.error === "string" ? j.error : "Save failed.");
       return;
     }
-    await loadAll();
+    await reload();
+  };
+
+  const applyTemplate = async (templateId) => {
+    if (!businessSlug || !templateId) return;
+    setApplyingTemplateId(templateId);
+    setTemplateError("");
+    const res = await managerFetch(businessSlug, "/api/manager/service-templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateId })
+    });
+    const j = await res.json().catch(() => ({}));
+    setApplyingTemplateId("");
+    if (!res.ok) {
+      setTemplateError(typeof j.error === "string" ? j.error : "Could not apply template.");
+      return;
+    }
+    await reload();
+    setTemplateError("");
+  };
+
+  const suggestionCategories = useMemo(() => {
+    const set = new Set((suggestions || []).map((s) => String(s.categoryName || "").trim()).filter(Boolean));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [suggestions]);
+
+  const filteredSuggestions = useMemo(() => {
+    const q = suggestionQuery.trim().toLowerCase();
+    return (suggestions || []).filter((s) => {
+      if (suggestionCategory !== "all" && String(s.categoryName) !== suggestionCategory) return false;
+      if (!q) return true;
+      const hay = `${s.name} ${s.description || ""} ${s.categoryName || ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [suggestions, suggestionQuery, suggestionCategory]);
+
+  const addSingleSuggestion = async (suggestionId) => {
+    if (!businessSlug || !suggestionId) return;
+    if (addedSuggestionIds.has(suggestionId)) return;
+    setApplyingTemplateId(suggestionId);
+    setTemplateError("");
+    const res = await managerFetch(businessSlug, "/api/manager/service-templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suggestionIds: [suggestionId] })
+    });
+    const j = await res.json().catch(() => ({}));
+    setApplyingTemplateId("");
+    if (!res.ok) {
+      setTemplateError(typeof j.error === "string" ? j.error : "Could not add suggestion.");
+      return;
+    }
+    await reload();
+    setAddedSuggestionIds((prev) => new Set(prev).add(suggestionId));
+    setTemplateError("");
   };
 
   return (
@@ -155,7 +243,15 @@ export function SchoolServicesPageClient() {
 
         <Card className="rounded-2xl border-border/50 bg-card/70 shadow-xl">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold">{t("manager.pages.services.catalogTitle")}</CardTitle>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base font-semibold">{t("manager.pages.services.catalogTitle")}</CardTitle>
+              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setTemplatesOpen(true)}>
+                Vorschläge
+              </Button>
+            </div>
+            {templateError ? (
+              <div className="rounded-lg border border-amber-500/35 bg-amber-950/30 px-3 py-2 text-xs text-amber-100">{templateError}</div>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-2">
             {sortedServices.length === 0 ? (
@@ -258,22 +354,36 @@ export function SchoolServicesPageClient() {
                       .map((s) => {
                         const on = assignSelected.has(String(s.id));
                         return (
-                          <label
+                          <button
                             key={s.id}
+                            type="button"
+                            onClick={() => toggleServiceInAssignment(s.id)}
+                            role="checkbox"
+                            aria-checked={on}
                             className={cn(
-                              "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-xs transition",
-                              on ? "border-primary/50 bg-primary/10" : "border-border/50 bg-card/40 hover:bg-muted/20"
+                              "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40",
+                              on
+                                ? "border-primary/55 bg-primary/15 text-foreground shadow-[inset_0_0_0_1px_rgba(99,102,241,0.35)]"
+                                : "border-border/50 bg-card/40 text-muted-foreground hover:bg-muted/25"
                             )}
                           >
-                            <input
-                              type="checkbox"
-                              className="rounded border-border"
-                              checked={on}
-                              onChange={() => toggleServiceInAssignment(s.id)}
-                            />
-                            <span className="font-medium text-foreground">{s.name}</span>
-                            <span className="text-muted-foreground">({s.duration} min)</span>
-                          </label>
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-semibold text-foreground">{s.name}</span>
+                              <span className="block text-[11px] text-muted-foreground">
+                                {s.duration} min
+                              </span>
+                            </span>
+                            {on ? (
+                              <span
+                                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/65 bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary-foreground/95"
+                                aria-hidden
+                              >
+                                <Check className="h-3 w-3" />
+                                Zugewiesen
+                                <X className="h-3 w-3 opacity-70" />
+                              </span>
+                            ) : null}
+                          </button>
                         );
                       })
                   )}
@@ -402,6 +512,74 @@ export function SchoolServicesPageClient() {
           setServiceDeleting(null);
         }}
       />
+
+      <ManagerDialog
+        open={templatesOpen}
+        onClose={() => setTemplatesOpen(false)}
+        title="Vorlagen für Fahrschulen"
+        wide
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Waehle gezielt empfohlene Leistungen aus und fuege nur die ausgewaehlten Services zu eurer Schule hinzu.
+          </p>
+          <div className="grid gap-2 md:grid-cols-2">
+            <Input
+              value={suggestionQuery}
+              onChange={(e) => setSuggestionQuery(e.target.value)}
+              placeholder="Leistung suchen..."
+              className="rounded-xl"
+            />
+            <Select value={suggestionCategory} onChange={(e) => setSuggestionCategory(e.target.value)} className="rounded-xl">
+              <option value="all">Alle Kategorien</option>
+              {suggestionCategories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {templatesLoading ? <p className="text-sm text-muted-foreground">{t("common.loading")}</p> : null}
+          {!templatesLoading && suggestions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Keine Vorschlaege verfuegbar.</p>
+          ) : (
+            <div className="max-h-[56vh] space-y-2 overflow-y-auto rounded-xl border border-border/50 bg-background/30 p-2">
+              {filteredSuggestions.map((s) => {
+                const suggestionId = String(s.id);
+                const added = addedSuggestionIds.has(suggestionId);
+                const adding = applyingTemplateId === suggestionId;
+                return (
+                  <div
+                    key={s.id}
+                    className={cn(
+                      "flex items-start justify-between gap-3 rounded-lg border px-3 py-2 text-xs transition",
+                      added ? "border-emerald-500/35 bg-emerald-950/20" : "border-border/40 bg-card/30 hover:bg-muted/20"
+                    )}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{s.name}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {s.categoryName} · {s.duration} min{s.price != null ? ` · ${s.price}` : ""}
+                      </p>
+                      {s.description ? <p className="mt-1 text-[11px] text-muted-foreground">{s.description}</p> : null}
+                    </div>
+                    <Button
+                      type="button"
+                      className="shrink-0 rounded-lg"
+                      size="sm"
+                      variant={added ? "outline" : "default"}
+                      disabled={added || adding}
+                      onClick={() => addSingleSuggestion(suggestionId)}
+                    >
+                      {added ? "Hinzugefügt" : adding ? "..." : "Hinzufügen"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </ManagerDialog>
     </>
   );
 }

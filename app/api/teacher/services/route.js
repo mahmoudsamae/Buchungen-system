@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getTeacherServiceRestriction } from "@/lib/manager/teacher-services-policy";
+import { getTeacherAllowedCategories } from "@/lib/manager/teacher-category-policy";
 
 export async function GET(request) {
   const g = await guardStaffJson(request);
@@ -32,6 +33,21 @@ export async function GET(request) {
     rows = [];
   }
 
+  const categoryById = new Map();
+  const categoryIds = [...new Set(rows.map((s) => String(s.category_id || "")).filter(Boolean))];
+  if (categoryIds.length) {
+    const { data: catRows } = await admin
+      .from("training_categories")
+      .select("id, name")
+      .eq("business_id", business.id)
+      .in("id", categoryIds);
+    for (const c of catRows || []) {
+      categoryById.set(String(c.id), String(c.name || ""));
+    }
+  }
+
+  const allowedCategories = await getTeacherAllowedCategories(admin, business.id, user.id);
+
   return NextResponse.json({
     services: rows.map((s) => ({
       id: s.id,
@@ -40,8 +56,11 @@ export async function GET(request) {
       is_active: s.is_active,
       price: s.price,
       description: s.description || "",
-      category_id: s.category_id || null
+      category_id: s.category_id || null,
+      category_name: s.category_id ? categoryById.get(String(s.category_id)) || "" : ""
     })),
+    categories: allowedCategories.categories || [],
+    categoriesRestricted: allowedCategories.mode === "restricted",
     assignmentMode: restriction.mode === "restricted" ? "restricted" : "unassigned",
     /** True when the school has set at least one teacher_services row (same as restricted mode). */
     hasExplicitAssignments: restriction.mode === "restricted"

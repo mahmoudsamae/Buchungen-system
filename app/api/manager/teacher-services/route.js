@@ -32,7 +32,7 @@ export async function GET(request) {
   }
 
   if (teacherId) {
-    const ids = (rows || []).filter((r) => String(r.teacher_id) === teacherId).map((r) => String(r.service_id));
+    const ids = [...new Set((rows || []).filter((r) => String(r.teacher_id) === teacherId).map((r) => String(r.service_id)))];
     return NextResponse.json({ teacherId, serviceIds: ids });
   }
 
@@ -44,7 +44,7 @@ export async function GET(request) {
   }
   const assignments = [...byTeacher.entries()].map(([teacherId, serviceIds]) => ({
     teacherId,
-    serviceIds
+    serviceIds: [...new Set(serviceIds)]
   }));
 
   return NextResponse.json({ assignments });

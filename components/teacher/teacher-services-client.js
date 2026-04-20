@@ -68,6 +68,11 @@ export function TeacherServicesClient({ schoolSlug }) {
                 <CardTitle className="text-base font-semibold leading-snug">{s.name}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-xs text-muted-foreground">
+                {s.category_name ? (
+                  <p>
+                    Category: {s.category_name}
+                  </p>
+                ) : null}
                 <p>
                   {t("teacher.services.duration")}: {s.duration_minutes} {t("teacher.services.min")}
                 </p>

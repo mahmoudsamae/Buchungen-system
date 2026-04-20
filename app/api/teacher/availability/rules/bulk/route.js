@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { guardStaffJson } from "@/lib/auth/guards";
 import { timeToMinutes, timesOverlapHalfOpenMinutes } from "@/lib/manager/booking-time";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { findCategoryForBusiness, normalizeCategoryId } from "@/lib/manager/category-utils";
 import { generateLessonSlotsWithBuffer } from "@/lib/teacher/slot-generator";
+import { getTeacherAllowedCategories } from "@/lib/manager/teacher-category-policy";
 
 function overlap(aStart, aEnd, bStart, bEnd) {
   const as = timeToMinutes(aStart);
@@ -34,6 +37,11 @@ export async function POST(request) {
   const g = await guardStaffJson(request);
   if (g.response) return g.response;
   const { business, user, supabase } = g.ctx;
+  let readDb = supabase;
+  try {
+    readDb = createAdminClient();
+  } catch {}
+  const allowedCategories = await getTeacherAllowedCategories(readDb, business.id, user.id);
 
   let body;
   try {
@@ -48,10 +56,22 @@ export async function POST(request) {
   }
 
   const replace = Boolean(body.replace_weekday);
+  const categoryId = normalizeCategoryId(body.categoryId ?? body.category_id);
   const valid_from = body.valid_from != null && body.valid_from !== "" ? String(body.valid_from).slice(0, 10) : null;
   const valid_until = body.valid_until != null && body.valid_until !== "" ? String(body.valid_until).slice(0, 10) : null;
   if (valid_from && valid_until && valid_from > valid_until) {
     return NextResponse.json({ error: "valid_from must be on or before valid_until." }, { status: 400 });
+  }
+  if (categoryId !== undefined && categoryId !== null) {
+    if (allowedCategories.mode === "restricted" && !allowedCategories.categoryIds.has(String(categoryId))) {
+      return NextResponse.json({ error: "You can only create slots for your assigned categories." }, { status: 400 });
+    }
+    const { category, error: cErr } = await findCategoryForBusiness(readDb, business.id, categoryId);
+    if (cErr) return NextResponse.json({ error: cErr.message }, { status: 400 });
+    if (!category) return NextResponse.json({ error: "Invalid category for this business." }, { status: 400 });
+  }
+  if (allowedCategories.mode === "restricted" && allowedCategories.categoryIds.size > 0 && categoryId == null) {
+    return NextResponse.json({ error: "Please select a category for these slots." }, { status: 400 });
   }
 
   let slotRows = [];
@@ -109,7 +129,8 @@ export async function POST(request) {
       .delete()
       .eq("business_id", business.id)
       .eq("staff_user_id", user.id)
-      .eq("weekday", weekday);
+      .eq("weekday", weekday)
+      .is("category_id", categoryId === undefined ? null : categoryId);
     if (delErr) {
       if (delErr.code === "42P01") {
         return NextResponse.json({ error: "Teacher availability table missing — run migrations." }, { status: 503 });
@@ -123,7 +144,8 @@ export async function POST(request) {
       .eq("business_id", business.id)
       .eq("staff_user_id", user.id)
       .eq("weekday", weekday)
-      .eq("is_active", true);
+      .eq("is_active", true)
+      .is("category_id", categoryId === undefined ? null : categoryId);
 
     for (const r of slotRows) {
       const hit = (existing || []).some((e) =>
@@ -148,7 +170,8 @@ export async function POST(request) {
     slot_duration_minutes: r.slot_duration_minutes != null ? r.slot_duration_minutes : null,
     buffer_minutes: r.buffer_minutes != null ? r.buffer_minutes : null,
     valid_from,
-    valid_until
+    valid_until,
+    category_id: categoryId === undefined ? null : categoryId
   }));
 
   const { data: rows, error } = await supabase.from("teacher_availability_rules").insert(insertPayload).select();
