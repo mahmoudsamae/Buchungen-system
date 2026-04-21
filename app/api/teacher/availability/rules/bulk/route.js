@@ -24,6 +24,13 @@ function sqlTime(h) {
   return b ? `${b}:00` : null;
 }
 
+function applyCategoryFilter(query, categoryId) {
+  if (categoryId === undefined || categoryId === null) {
+    return query.is("category_id", null);
+  }
+  return query.eq("category_id", categoryId);
+}
+
 /**
  * Bulk-create weekly rules from generated slot rows, or from explicit slot list.
  * POST body:
@@ -124,13 +131,16 @@ export async function POST(request) {
   }
 
   if (replace) {
-    const { error: delErr } = await supabase
+    const deleteQuery = applyCategoryFilter(
+      supabase
       .from("teacher_availability_rules")
       .delete()
       .eq("business_id", business.id)
       .eq("staff_user_id", user.id)
-      .eq("weekday", weekday)
-      .is("category_id", categoryId === undefined ? null : categoryId);
+      .eq("weekday", weekday),
+      categoryId === undefined ? null : categoryId
+    );
+    const { error: delErr } = await deleteQuery;
     if (delErr) {
       if (delErr.code === "42P01") {
         return NextResponse.json({ error: "Teacher availability table missing — run migrations." }, { status: 503 });
@@ -138,14 +148,17 @@ export async function POST(request) {
       return NextResponse.json({ error: delErr.message }, { status: 400 });
     }
   } else {
-    const { data: existing } = await supabase
+    const existingQuery = applyCategoryFilter(
+      supabase
       .from("teacher_availability_rules")
       .select("id, start_time, end_time, is_active")
       .eq("business_id", business.id)
       .eq("staff_user_id", user.id)
       .eq("weekday", weekday)
-      .eq("is_active", true)
-      .is("category_id", categoryId === undefined ? null : categoryId);
+      .eq("is_active", true),
+      categoryId === undefined ? null : categoryId
+    );
+    const { data: existing } = await existingQuery;
 
     for (const r of slotRows) {
       const hit = (existing || []).some((e) =>
